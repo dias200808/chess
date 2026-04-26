@@ -24,14 +24,12 @@
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",
-    "@next/swc-win32-x64-msvc": "^16.2.4",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
-    "lightningcss-win32-x64-msvc": "^1.32.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
