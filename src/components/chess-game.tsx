@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Chess, type Square } from "chess.js";
 import { RotateCcw, Save, Search, ShieldOff, Shuffle } from "lucide-react";
 import { getBotProfile } from "@/lib/bot-profiles";
@@ -20,7 +21,7 @@ import { saveGameToSupabase } from "@/lib/supabase-data";
 import { formatDate } from "@/lib/utils";
 import { useAuth } from "@/components/auth-provider";
 import { Chessboard } from "@/components/client-chessboard";
-import { Badge, Button, Card, LinkButton } from "@/components/ui";
+import { Badge, Button, Card } from "@/components/ui";
 
 function replay(moves: string[]) {
   const chess = new Chess();
@@ -101,6 +102,7 @@ export function ChessGame({
   difficulty?: BotDifficulty;
   timeControl?: TimeControl;
 }) {
+  const router = useRouter();
   const { user, updateProfile } = useAuth();
   const [moves, setMoves] = useState<string[]>([]);
   const [orientation, setOrientation] = useState<"white" | "black">(playerColor);
@@ -115,6 +117,7 @@ export function ChessGame({
     null,
   );
   const [analysisError, setAnalysisError] = useState("");
+  const [isOpeningReview, setIsOpeningReview] = useState(false);
   const lastTickRef = useRef(0);
 
   const chess = useMemo(() => replay(moves), [moves]);
@@ -372,6 +375,7 @@ export function ChessGame({
   async function persistGame() {
     const analysis = postGameAnalysis ?? heuristicAnalysis;
     const id = savedId ?? crypto.randomUUID();
+    const shouldRecordProfile = !savedId && user && result.result !== "*";
     const game: SavedGame = {
       id,
       mode,
@@ -403,7 +407,7 @@ export function ChessGame({
     }
     setSavedId(id);
 
-    if (user && result.result !== "*") {
+    if (shouldRecordProfile) {
       const userSide = playerColor;
       const userWon = result.winner === userSide;
       const draw = result.winner === "draw";
@@ -414,6 +418,19 @@ export function ChessGame({
         draws: user.draws + (draw ? 1 : 0),
         rating: user.rating + (draw ? 0 : userWon ? 10 : -10),
       });
+    }
+
+    return id;
+  }
+
+  async function openReview() {
+    if (!moves.length) return;
+    setIsOpeningReview(true);
+    try {
+      const id = await persistGame();
+      router.push(`/analysis?id=${id}`);
+    } finally {
+      setIsOpeningReview(false);
     }
   }
 
@@ -433,6 +450,32 @@ export function ChessGame({
   }
 
   const reviewCounts = summarizeMoveTypes(activeAnalysis.evaluations);
+  const countMoveTypes = (...types: GameAnalysis["evaluations"][number]["type"][]) =>
+    activeAnalysis.evaluations.filter((item) => types.includes(item.type)).length;
+  const postGameTitle =
+    result.winner === "draw"
+      ? "Ничья"
+      : mode === "bot"
+        ? result.winner === playerColor
+          ? "Вы выиграли"
+          : "Вы проиграли"
+        : result.winner === "white"
+          ? "Победили белые"
+          : "Победили черные";
+  const postGameStats = [
+    {
+      label: "Ошибки",
+      value: countMoveTypes("inaccuracy", "mistake", "blunder", "missed win"),
+    },
+    {
+      label: "Хорошие",
+      value: countMoveTypes("best move", "excellent", "good move"),
+    },
+    {
+      label: "Бриллианты",
+      value: countMoveTypes("brilliant"),
+    },
+  ];
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_24rem]">
@@ -475,7 +518,7 @@ export function ChessGame({
             <p className="font-mono text-3xl font-black">{sideClock(topSide)}</p>
           </div>
 
-          <div className="mx-auto w-full">
+          <div className="relative mx-auto w-full">
             <Chessboard
               options={{
                 id: `knightly-${mode}`,
@@ -498,6 +541,40 @@ export function ChessGame({
                 darkSquareStyle: { backgroundColor: "#58764a" },
               }}
             />
+            {isGameOver ? (
+              <div className="absolute inset-0 grid place-items-center bg-black/25 p-4 backdrop-blur-[2px]">
+                <div className="w-full max-w-md rounded-2xl border bg-card/95 p-5 text-card-foreground shadow-2xl">
+                  <p className="text-sm font-semibold text-muted-foreground">{result.label}</p>
+                  <h2 className="mt-1 text-3xl font-black tracking-tight">{postGameTitle}</h2>
+
+                  <div className="mt-4 grid grid-cols-3 gap-2">
+                    {postGameStats.map((item) => (
+                      <div key={item.label} className="rounded-xl bg-muted p-3 text-center">
+                        <p className="text-xs font-semibold text-muted-foreground">{item.label}</p>
+                        <p className="mt-1 font-mono text-2xl font-black">{item.value}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <Button variant="secondary" onClick={newGame}>
+                      <RotateCcw className="mr-2 h-4 w-4" />
+                      Новая
+                    </Button>
+                    <Button onClick={openReview} disabled={isOpeningReview}>
+                      <Search className="mr-2 h-4 w-4" />
+                      {isOpeningReview ? "Открываю..." : "Разбор"}
+                    </Button>
+                  </div>
+
+                  {analysisProgress ? (
+                    <p className="mt-3 text-center text-xs text-muted-foreground">
+                      Stockfish считает: {analysisProgress.done}/{analysisProgress.total}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div
@@ -553,14 +630,15 @@ export function ChessGame({
               Сохранить
             </Button>
           </div>
-          <LinkButton
-            href={savedId ? `/analysis?id=${savedId}` : "/analysis"}
+          <Button
             variant="secondary"
             className="mt-3 w-full"
+            onClick={openReview}
+            disabled={!moves.length || isOpeningReview}
           >
             <Search className="mr-2 h-4 w-4" />
-            Полный анализ
-          </LinkButton>
+            {isOpeningReview ? "Открываю разбор..." : "Полный анализ"}
+          </Button>
           {savedId ? (
             <p className="mt-3 text-xs text-muted-foreground">
               Сохранено {formatDate(new Date())}. Партию можно открыть из истории в любое время.
