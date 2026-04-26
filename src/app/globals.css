@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #f5f1e8;
+  --foreground: #17130d;
+  --card: #fffaf0;
+  --card-foreground: #17130d;
+  --muted: #e9dec9;
+  --muted-foreground: #73624d;
+  --border: #dac8aa;
+  --primary: #1f7a4d;
+  --primary-foreground: #fffdf6;
+  --accent: #d89a2b;
+  --accent-foreground: #17130d;
+  --destructive: #b42318;
+  --ring: #1f7a4d;
+}
+
+.dark {
+  --background: #0f1712;
+  --foreground: #f5f1e8;
+  --card: #17231b;
+  --card-foreground: #fffaf0;
+  --muted: #243226;
+  --muted-foreground: #b9ad99;
+  --border: #30422f;
+  --primary: #60c58d;
+  --primary-foreground: #07110b;
+  --accent: #f0b84d;
+  --accent-foreground: #17130d;
+  --destructive: #ff7468;
+  --ring: #60c58d;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-ring: var(--ring);
+  --font-sans: "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
+}
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--accent) 22%, transparent), transparent 32rem),
+    radial-gradient(circle at 90% 10%, color-mix(in srgb, var(--primary) 24%, transparent), transparent 28rem),
+    var(--background);
+}
+
+button,
+a,
+input,
+select {
+  outline-color: var(--ring);
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
