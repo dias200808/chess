@@ -15,6 +15,13 @@ export type BotDifficulty =
   | "elo-2400"
   | "stockfish";
 
+export type TimeControl = {
+  id: string;
+  label: string;
+  initialSeconds: number | null;
+  incrementSeconds: number;
+};
+
 export type UserProfile = {
   id: string;
   email: string;
@@ -40,6 +47,7 @@ export type SavedGame = {
   moves: string[];
   pgn: string;
   finalPosition: string;
+  timeControl?: string;
   whiteAccuracy: number;
   blackAccuracy: number;
   analysis: GameAnalysis;
@@ -50,12 +58,15 @@ export type MoveEvaluation = {
   moveNumber: number;
   san: string;
   type:
+    | "brilliant"
     | "best move"
+    | "excellent"
     | "good move"
     | "inaccuracy"
     | "mistake"
     | "blunder"
     | "missed win";
+  centipawnLoss?: number;
   scoreBefore: number;
   scoreAfter: number;
   note: string;

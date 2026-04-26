@@ -1,13 +1,13 @@
 import type { Puzzle, UserProfile } from "@/lib/types";
 
 export const navItems = [
-  { href: "/play", label: "Play" },
-  { href: "/bot", label: "Bot" },
-  { href: "/friend", label: "Friend" },
-  { href: "/puzzles", label: "Puzzles" },
-  { href: "/history", label: "History" },
-  { href: "/leaderboard", label: "Leaderboard" },
-  { href: "/learn", label: "Learn" },
+  { href: "/play", label: "Играть" },
+  { href: "/bot", label: "Бот" },
+  { href: "/friend", label: "Друг" },
+  { href: "/puzzles", label: "Задачи" },
+  { href: "/history", label: "История" },
+  { href: "/leaderboard", label: "Рейтинг" },
+  { href: "/learn", label: "Обучение" },
   { href: "/pricing", label: "Pro" },
 ];
 

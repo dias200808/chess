@@ -1,6 +1,6 @@
 "use client";
 
-import { Chessboard } from "react-chessboard";
+import { Chessboard } from "@/components/client-chessboard";
 import { Badge, Card } from "@/components/ui";
 import { lessons } from "@/lib/data";
 

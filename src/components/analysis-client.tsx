@@ -3,13 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Chess } from "chess.js";
-import { Chessboard } from "react-chessboard";
 import { ChevronLeft, ChevronRight, Cpu } from "lucide-react";
 import type { GameAnalysis, SavedGame } from "@/lib/types";
-import { analyzeMoves } from "@/lib/chess-utils";
+import { analyzeMoves, moveTypeLabel, summarizeMoveTypes } from "@/lib/chess-utils";
 import { runStockfishGameAnalysis } from "@/lib/stockfish-client";
 import { getSavedGame, getSavedGames } from "@/lib/storage";
 import { fetchGameFromSupabase } from "@/lib/supabase-data";
+import { Chessboard } from "@/components/client-chessboard";
 import { Badge, Button, Card, LinkButton } from "@/components/ui";
 
 function positionAt(moves: string[], ply: number) {
@@ -73,17 +73,25 @@ export function AnalysisClient() {
     setEngineError("");
     setEngineProgress({ done: 0, total: game.moves.length });
     try {
-      const stockfishAnalysis = await runStockfishGameAnalysis(game.moves, (done, total) => {
-        setEngineProgress({ done, total });
+      const stockfishAnalysis = await runStockfishGameAnalysis(game.moves, {
+        beforeDepth: 12,
+        afterDepth: 11,
+        beforeMoveTime: 700,
+        afterMoveTime: 450,
+        timeout: 12000,
+        onProgress: (done, total) => {
+          setEngineProgress({ done, total });
+        },
       });
       setAnalysis(stockfishAnalysis);
     } catch {
-      setEngineError("Stockfish could not finish analysis in this browser. Showing MVP analysis.");
+      setEngineError("Stockfish не смог завершить разбор в этом браузере. Показана быстрая версия.");
     } finally {
       setEngineProgress(null);
     }
   }
 
+  const reviewCounts = summarizeMoveTypes(analysis.evaluations);
   const evalPoints = analysis.evaluations.map((item, index) => ({
     x: analysis.evaluations.length <= 1 ? 0 : (index / (analysis.evaluations.length - 1)) * 100,
     y: 50 - Math.max(-900, Math.min(900, item.scoreAfter)) / 18,
@@ -130,9 +138,12 @@ export function AnalysisClient() {
 
       <aside className="grid gap-4 content-start">
         <Card>
-          <h2 className="text-xl font-black">AI Coach summary</h2>
+          <h2 className="text-xl font-black">Сводка по партии</h2>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">{analysis.summary}</p>
           <p className="mt-4 rounded-2xl bg-muted p-4 text-sm font-medium">{analysis.trainingFocus}</p>
+          {game.timeControl ? (
+            <p className="mt-4 text-sm text-muted-foreground">Контроль времени: {game.timeControl}</p>
+          ) : null}
           <Button
             className="mt-4 w-full"
             variant="secondary"
@@ -142,7 +153,7 @@ export function AnalysisClient() {
             <Cpu className="mr-2 h-4 w-4" />
             {engineProgress
               ? `Stockfish ${engineProgress.done}/${engineProgress.total}`
-              : "Run Stockfish deep analysis"}
+              : "Запустить глубокий Stockfish-анализ"}
           </Button>
           {engineError ? (
             <p className="mt-3 rounded-2xl bg-destructive/10 p-3 text-sm text-destructive">
@@ -152,16 +163,29 @@ export function AnalysisClient() {
         </Card>
         <div className="grid grid-cols-2 gap-4">
           <Card>
-            <p className="text-sm text-muted-foreground">White accuracy</p>
+            <p className="text-sm text-muted-foreground">Точность белых</p>
             <p className="font-mono text-4xl font-black">{analysis.whiteAccuracy}%</p>
           </Card>
           <Card>
-            <p className="text-sm text-muted-foreground">Black accuracy</p>
+            <p className="text-sm text-muted-foreground">Точность черных</p>
             <p className="font-mono text-4xl font-black">{analysis.blackAccuracy}%</p>
           </Card>
         </div>
+        <Card>
+          <h2 className="text-xl font-black">Качество ходов</h2>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            {reviewCounts.map((item) => (
+              <div key={item.type} className="rounded-2xl bg-muted p-4">
+                <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                  {moveTypeLabel(item.type)}
+                </p>
+                <p className="mt-2 font-mono text-3xl font-black">{item.count}</p>
+              </div>
+            ))}
+          </div>
+        </Card>
         <Card className="max-h-[28rem] overflow-auto">
-          <h2 className="text-xl font-black">Move review</h2>
+          <h2 className="text-xl font-black">Разбор ходов</h2>
           <div className="mt-4 grid gap-2">
             {analysis.evaluations.map((item, index) => (
               <button
@@ -170,10 +194,15 @@ export function AnalysisClient() {
                 onClick={() => setPly(index + 1)}
               >
                 <span className="font-mono font-bold">{item.moveNumber}. {item.san}</span>
-                <Badge className="ml-2">{item.type}</Badge>
+                <Badge className="ml-2">{moveTypeLabel(item.type)}</Badge>
                 {item.bestMove ? (
                   <span className="ml-2 text-xs text-muted-foreground">
-                    best: {item.bestMove}
+                    лучший: {item.bestMove}
+                  </span>
+                ) : null}
+                {typeof item.centipawnLoss === "number" ? (
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    CPL: {item.centipawnLoss}
                   </span>
                 ) : null}
                 <span className="mt-1 block text-muted-foreground">{item.note}</span>
@@ -182,16 +211,16 @@ export function AnalysisClient() {
           </div>
         </Card>
         <Card>
-          <h2 className="text-xl font-black">Engine graph</h2>
+          <h2 className="text-xl font-black">График оценки</h2>
           <svg className="mt-4 h-32 w-full overflow-visible rounded-2xl bg-muted" viewBox="0 0 100 100" preserveAspectRatio="none">
             <line x1="0" x2="100" y1="50" y2="50" stroke="currentColor" strokeOpacity="0.22" strokeWidth="1" />
             <path d={evalPath} fill="none" stroke="var(--primary)" strokeWidth="3" vectorEffect="non-scaling-stroke" />
           </svg>
           <p className="mt-3 text-xs text-muted-foreground">
-            Positive values favor White, negative values favor Black. Run Stockfish for deeper engine points.
+            Плюс означает перевес белых, минус означает перевес черных.
           </p>
         </Card>
-        <LinkButton href="/history" variant="secondary">Back to history</LinkButton>
+        <LinkButton href="/history" variant="secondary">Назад в историю</LinkButton>
       </aside>
     </div>
   );

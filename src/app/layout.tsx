@@ -16,9 +16,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Knightly | Chess MVP Platform",
+  title: "Knightly | Шахматная платформа",
   description:
-    "A modern chess platform MVP with games, bots, puzzles, analysis, ratings, and profiles.",
+    "Шахматная платформа с партиями, ботами, задачами, анализом, рейтингом и профилями.",
 };
 
 export default function RootLayout({
@@ -28,7 +28,7 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
+      lang="ru"
       suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full`}
     >

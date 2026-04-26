@@ -20,35 +20,33 @@ export default function LoginPage() {
       await login(email, password);
       router.push("/profile");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Login failed.");
+      setError(caught instanceof Error ? caught.message : "Не удалось войти.");
     }
   }
 
   return (
     <div className="mx-auto max-w-md">
       <Card>
-        <h1 className="text-3xl font-black">Log in</h1>
+        <h1 className="text-3xl font-black">Вход</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           {authMode === "supabase"
-            ? "Supabase Auth is active."
-            : "Local MVP auth is active until Supabase env vars are configured."}
+            ? "Подключён вход через Supabase."
+            : "Используется локальный вход для MVP-режима."}
         </p>
         <form className="mt-6 grid gap-4" onSubmit={onSubmit}>
           <Field label="Email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
-          {authMode === "supabase" ? (
-            <Field
-              label="Password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-            />
-          ) : null}
+          <Field
+            label="Пароль"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            required
+          />
           {error ? <p className="rounded-2xl bg-destructive/10 p-3 text-sm text-destructive">{error}</p> : null}
-          <Button type="submit">Log in</Button>
+          <Button type="submit">Войти</Button>
         </form>
         <p className="mt-4 text-sm text-muted-foreground">
-          No account? <Link className="font-semibold text-primary" href="/register">Register</Link>
+          Нет аккаунта? <Link className="font-semibold text-primary" href="/register">Зарегистрироваться</Link>
         </p>
       </Card>
     </div>

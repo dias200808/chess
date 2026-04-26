@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Chess, type Move, type Square } from "chess.js";
-import { Chessboard } from "react-chessboard";
+import { Chessboard } from "@/components/client-chessboard";
 import { Flame, Heart, Lightbulb, Timer, Trophy, Zap } from "lucide-react";
 import { Badge, Button, Card, SelectField } from "@/components/ui";
 import { puzzles } from "@/lib/data";

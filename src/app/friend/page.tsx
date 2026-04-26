@@ -3,8 +3,9 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Chess, type Square } from "chess.js";
-import { Chessboard } from "react-chessboard";
-import { Copy, Link as LinkIcon, Users } from "lucide-react";
+import { Copy, Link as LinkIcon, Swords, Users } from "lucide-react";
+import { BoardStagePreview } from "@/components/board-stage-preview";
+import { Chessboard } from "@/components/client-chessboard";
 import { ChessGame } from "@/components/chess-game";
 import { useAuth } from "@/components/auth-provider";
 import { Badge, Button, Card } from "@/components/ui";
@@ -56,7 +57,7 @@ function FriendClient() {
       const joined = await joinRoomInSupabase(roomId, user.id);
       const activeRoom = joined ?? (await fetchRoomFromSupabase(roomId));
       if (!activeRoom) {
-        setMessage("Room not found.");
+        setMessage("Комната не найдена.");
         return;
       }
       setRoom(activeRoom);
@@ -81,7 +82,7 @@ function FriendClient() {
         status: "placeholder",
         createdAt: new Date().toISOString(),
       });
-      setMessage("Local fallback room created. Configure Supabase and log in for online sync.");
+      setMessage("Создан локальный режим. Для онлайн-синхронизации подключите Supabase и войдите в аккаунт.");
       return;
     }
 
@@ -89,7 +90,7 @@ function FriendClient() {
     if (!created) return;
     setRoom(created);
     setMoves([]);
-    setMessage("Realtime room created. Share the link with your friend.");
+    setMessage("Комната создана. Отправьте ссылку другу.");
     subscribeToRoom(created.id, (nextRoom) => {
       setRoom(nextRoom);
       setMoves(nextRoom.moves ?? []);
@@ -143,37 +144,83 @@ function FriendClient() {
 
   return (
     <div className="grid gap-6">
-      <Card>
-        <Badge>{canUseRealtime ? "Supabase Realtime" : "Local fallback"}</Badge>
-        <h1 className="mt-3 text-3xl font-black">Play with a friend</h1>
-        <p className="mt-2 max-w-3xl text-muted-foreground">
-          Create a room, share the link, and moves sync through Supabase Realtime when Supabase
-          Auth and env vars are configured.
-        </p>
-        <div className="mt-5 flex flex-wrap gap-3">
-          <Button onClick={createRoom}>
-            <LinkIcon className="mr-2 h-4 w-4" />
-            Create Game
-          </Button>
-          {room ? (
+      {!room ? (
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_32rem]">
+          <BoardStagePreview
+            topLabel="Друг"
+            topMeta="Подключится по ссылке"
+            bottomLabel="Вы"
+            bottomMeta={canUseRealtime ? "Онлайн-комната" : "Локальный режим"}
+          />
+
+          <section className="grid gap-4 rounded-[1.75rem] border border-white/6 bg-[#262421] p-4 text-[#f4efe4] shadow-2xl shadow-black/20">
+            <div className="border-b border-white/6 px-1 pb-4">
+              <Badge className="border-[#5f8443] bg-[#4d6a36] text-[#f7f2e7]">
+                Игра с другом
+              </Badge>
+              <h1 className="mt-3 text-4xl font-black text-white">Создайте комнату</h1>
+              <p className="mt-2 text-sm leading-6 text-[#beb6a7]">
+                Сгенерируйте ссылку, отправьте её другу и начните общую партию. Если
+                Supabase уже подключен, ходы будут синхронизироваться в реальном времени.
+              </p>
+            </div>
+
+            <section className="rounded-[1.6rem] border border-white/7 bg-[#34312d] p-5">
+              <div className="flex items-start gap-4">
+                <div className="grid h-14 w-14 place-items-center rounded-2xl bg-[#4d6a36] text-white">
+                  <Users className="h-7 w-7" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-2xl font-black text-white">Комната партии</h2>
+                  <p className="mt-2 text-sm leading-6 text-[#c8c1b3]">
+                    Один клик для создания комнаты, затем ссылка для приглашения и старт
+                    партии после подключения второго игрока.
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <Button onClick={createRoom}>
+                      <LinkIcon className="mr-2 h-4 w-4" />
+                      Создать комнату
+                    </Button>
+                    <a
+                      href="/play"
+                      className="inline-flex h-11 items-center justify-center rounded-full border border-white/10 bg-white/6 px-5 text-sm font-semibold text-white transition hover:bg-white/12"
+                    >
+                      <Swords className="mr-2 h-4 w-4" />
+                      Локальная партия
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {message ? <p className="px-1 text-sm text-[#beb6a7]">{message}</p> : null}
+          </section>
+        </div>
+      ) : (
+        <Card>
+          <Badge>{canUseRealtime ? "Supabase Realtime" : "Локальный режим"}</Badge>
+          <h1 className="mt-3 text-3xl font-black">Комната с другом</h1>
+          <p className="mt-2 max-w-3xl text-muted-foreground">
+            Скопируйте ссылку и отправьте ее другу. После подключения второго игрока
+            ходы будут синхронизироваться в этой комнате.
+          </p>
+          <div className="mt-5 flex flex-wrap gap-3">
             <Button variant="secondary" onClick={copyLink}>
               <Copy className="mr-2 h-4 w-4" />
-              Copy Link
+              Копировать ссылку
             </Button>
-          ) : null}
-        </div>
-        {room ? (
+          </div>
           <div className="mt-4 grid gap-3 rounded-2xl border bg-muted p-4 text-sm">
             <div className="font-mono break-all">{room.link}</div>
             <div className="flex flex-wrap gap-2">
               <Badge>{room.status}</Badge>
-              <Badge>Your side: {playerColor ?? "spectator/local"}</Badge>
+              <Badge>Ваша сторона: {playerColor ?? "наблюдатель"}</Badge>
               <Badge>{result.label}</Badge>
             </div>
           </div>
-        ) : null}
-        {message ? <p className="mt-3 text-sm text-muted-foreground">{message}</p> : null}
-      </Card>
+          {message ? <p className="mt-3 text-sm text-muted-foreground">{message}</p> : null}
+        </Card>
+      )}
 
       {room && canUseRealtime ? (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
@@ -202,7 +249,7 @@ function FriendClient() {
           </Card>
           <Card>
             <Users className="h-5 w-5 text-primary" />
-            <h2 className="mt-3 text-xl font-black">Synced move history</h2>
+            <h2 className="mt-3 text-xl font-black">Синхронизированные ходы</h2>
             <div className="mt-4 grid grid-cols-[3rem_1fr_1fr] gap-2 text-sm">
               {Array.from({ length: Math.ceil(moves.length / 2) }).map((_, index) => (
                 <div key={index} className="contents">
@@ -223,7 +270,7 @@ function FriendClient() {
 
 export default function FriendPage() {
   return (
-    <Suspense fallback={<Card>Loading friend room...</Card>}>
+    <Suspense fallback={<Card>Загрузка комнаты...</Card>}>
       <FriendClient />
     </Suspense>
   );

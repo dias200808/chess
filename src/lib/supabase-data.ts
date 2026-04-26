@@ -2,6 +2,8 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 import type { GameAnalysis, GameMode, GameResult, PuzzleProgress, Room, SavedGame, UserProfile } from "@/lib/types";
 import { getSupabaseClient } from "@/lib/supabase";
 
+const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
+
 function avatarFor(username: string) {
   return username
     .split(/\s|_/)
@@ -201,7 +203,7 @@ export async function createRoomInSupabase(userId: string) {
   if (!supabase) return null;
   const { data, error } = await supabase
     .from("rooms")
-    .insert({ white_user_id: userId, current_position: "start", moves: [], status: "waiting" })
+    .insert({ white_user_id: userId, current_position: START_FEN, moves: [], status: "waiting" })
     .select("*")
     .single();
   if (error) throw error;
@@ -268,7 +270,7 @@ export function mapRoom(row: Record<string, unknown>): Room {
     link: typeof window === "undefined" ? "" : `${window.location.origin}/friend?room=${row.id}`,
     whiteUserId: row.white_user_id ? String(row.white_user_id) : undefined,
     blackUserId: row.black_user_id ? String(row.black_user_id) : undefined,
-    currentPosition: String(row.current_position ?? "start"),
+    currentPosition: String(row.current_position ?? START_FEN),
     moves: Array.isArray(row.moves) ? (row.moves as string[]) : [],
     status: String(row.status ?? "waiting") as Room["status"],
     result: row.result ? String(row.result) : undefined,

@@ -5,6 +5,12 @@ const SESSION_KEY = "knightly.session";
 const GAMES_KEY = "knightly.games";
 const PUZZLES_KEY = "knightly.puzzles";
 const SETTINGS_KEY = "knightly.settings";
+const LOCAL_CREDENTIALS_KEY = "knightly.local-credentials";
+
+type LocalCredential = {
+  email: string;
+  passwordHash: string;
+};
 
 function readJson<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -27,6 +33,30 @@ export function getProfiles() {
 
 export function saveProfiles(profiles: UserProfile[]) {
   writeJson(PROFILE_KEY, profiles);
+}
+
+export function getLocalCredentials() {
+  return readJson<LocalCredential[]>(LOCAL_CREDENTIALS_KEY, []);
+}
+
+export function saveLocalCredentials(credentials: LocalCredential[]) {
+  writeJson(LOCAL_CREDENTIALS_KEY, credentials);
+}
+
+export function upsertLocalCredential(credential: LocalCredential) {
+  const next = [
+    credential,
+    ...getLocalCredentials().filter(
+      (item) => item.email.toLowerCase() !== credential.email.toLowerCase(),
+    ),
+  ];
+  saveLocalCredentials(next);
+}
+
+export function getLocalCredentialByEmail(email: string) {
+  return getLocalCredentials().find(
+    (item) => item.email.toLowerCase() === email.toLowerCase(),
+  );
 }
 
 export function getSessionUserId() {

@@ -32,6 +32,73 @@ const EXTENDED_CENTER = new Set([
 ]);
 const MAX_BRANCHING_MOVES = 30;
 
+export function summarizeMoveTypes(evaluations: GameAnalysis["evaluations"]) {
+  const order = [
+    "brilliant",
+    "best move",
+    "excellent",
+    "good move",
+    "inaccuracy",
+    "mistake",
+    "blunder",
+    "missed win",
+  ] satisfies GameAnalysis["evaluations"][number]["type"][];
+
+  return order
+    .map((type) => ({
+      type,
+      count: evaluations.filter((item) => item.type === type).length,
+    }))
+    .filter((item) => item.count > 0);
+}
+
+export function moveTypeLabel(type: GameAnalysis["evaluations"][number]["type"]) {
+  switch (type) {
+    case "brilliant":
+      return "Бриллиант";
+    case "best move":
+      return "Лучший";
+    case "excellent":
+      return "Отличный";
+    case "good move":
+      return "Хороший";
+    case "inaccuracy":
+      return "Неточность";
+    case "mistake":
+      return "Ошибка";
+    case "blunder":
+      return "Зевок";
+    case "missed win":
+      return "Упущенная победа";
+    default:
+      return type;
+  }
+}
+
+export function classifyMoveQuality({
+  centipawnLoss,
+  isBest,
+  sideAdvantage,
+  materialSwing,
+  playedSan,
+}: {
+  centipawnLoss: number;
+  isBest: boolean;
+  sideAdvantage: number;
+  materialSwing: number;
+  playedSan: string;
+}): GameAnalysis["evaluations"][number]["type"] {
+  if (playedSan.includes("#")) return "best move";
+  if (isBest && materialSwing <= -250 && centipawnLoss <= 20) return "brilliant";
+  if (isBest) return "best move";
+  if (centipawnLoss <= 18) return "excellent";
+  if (centipawnLoss <= 55) return "good move";
+  if (centipawnLoss <= 120) return "inaccuracy";
+  if (sideAdvantage > 450 && centipawnLoss >= 280) return "missed win";
+  if (centipawnLoss <= 260) return "mistake";
+  return "blunder";
+}
+
 export function getGameResult(chess: Chess): {
   result: GameResult;
   winner: SavedGame["winner"];
@@ -42,24 +109,24 @@ export function getGameResult(chess: Chess): {
     return {
       result: winner === "white" ? "1-0" : "0-1",
       winner,
-      label: `Checkmate. ${winner === "white" ? "White" : "Black"} wins.`,
+      label: `Мат. Победили ${winner === "white" ? "белые" : "черные"}.`,
     };
   }
 
   if (chess.isStalemate()) {
-    return { result: "1/2-1/2", winner: "draw", label: "Draw by stalemate." };
+    return { result: "1/2-1/2", winner: "draw", label: "Ничья патом." };
   }
 
   if (chess.isDraw()) {
-    return { result: "1/2-1/2", winner: "draw", label: "Draw." };
+    return { result: "1/2-1/2", winner: "draw", label: "Ничья." };
   }
 
   return {
     result: "*",
     winner: null,
     label: chess.isCheck()
-      ? `${chess.turn() === "w" ? "White" : "Black"} to move, in check.`
-      : `${chess.turn() === "w" ? "White" : "Black"} to move.`,
+      ? `Ход ${chess.turn() === "w" ? "белых" : "черных"}, шах.`
+      : `Ход ${chess.turn() === "w" ? "белых" : "черных"}.`,
   };
 }
 
@@ -263,47 +330,50 @@ export function analyzeMoves(moves: string[]): GameAnalysis {
 
     const after = materialScore(chess.fen());
     const delta = color === "w" ? after - before : before - after;
-    const type =
-      move.san.includes("#")
-        ? "best move"
-        : delta <= -350
-          ? "blunder"
-          : delta <= -180
-            ? "mistake"
-            : delta <= -70
-              ? "inaccuracy"
-              : delta >= 250
-                ? "best move"
-                : delta >= 80
-                  ? "good move"
-                  : "good move";
+    const centipawnLoss = Math.max(0, -delta);
+    const type = classifyMoveQuality({
+      centipawnLoss,
+      isBest: delta >= 120 || move.san.includes("#"),
+      sideAdvantage: color === "w" ? before : -before,
+      materialSwing: delta,
+      playedSan: move.san,
+    });
 
     const penalty =
-      type === "blunder" ? 18 : type === "mistake" ? 10 : type === "inaccuracy" ? 5 : 0;
+      type === "blunder" || type === "missed win"
+        ? 18
+        : type === "mistake"
+          ? 10
+          : type === "inaccuracy"
+            ? 5
+            : 0;
     penalties[color] += penalty;
 
     evaluations.push({
       moveNumber: Math.floor(index / 2) + 1,
       san: move.san,
       type,
+      centipawnLoss,
       scoreBefore: before,
       scoreAfter: after,
       note:
-        type === "blunder"
-          ? "A large material or mate swing appeared after this move."
-          : type === "mistake"
-            ? "This move gave the opponent a clearer path to improve."
-            : type === "inaccuracy"
-              ? "Playable, but it missed a more active or safer continuation."
-              : "This keeps the position healthy and follows the tactical demands.",
+        type === "brilliant"
+          ? "Сильная идея с тактической точностью или осознанной жертвой."
+          : type === "blunder"
+            ? "После этого хода позиция резко ухудшилась."
+            : type === "mistake"
+              ? "Ход допустимый, но дал сопернику серьезное улучшение."
+              : type === "inaccuracy"
+                ? "Играбельно, но был вариант заметно сильнее."
+                : "Ход поддерживает качество позиции.",
     });
   });
 
   const worstMoment = [...evaluations]
-    .filter((item) => ["blunder", "mistake", "inaccuracy"].includes(item.type))
+    .filter((item) => ["blunder", "mistake", "missed win", "inaccuracy"].includes(item.type))
     .sort((a, b) => Math.abs(b.scoreAfter - b.scoreBefore) - Math.abs(a.scoreAfter - a.scoreBefore))[0];
   const bestMoment = [...evaluations]
-    .filter((item) => ["best move", "good move"].includes(item.type))
+    .filter((item) => ["brilliant", "best move", "excellent", "good move"].includes(item.type))
     .sort((a, b) => Math.abs(b.scoreAfter - b.scoreBefore) - Math.abs(a.scoreAfter - a.scoreBefore))[0];
 
   const whiteAccuracy = Math.max(35, 100 - penalties.w);
@@ -316,10 +386,10 @@ export function analyzeMoves(moves: string[]): GameAnalysis {
     bestMoment,
     worstMoment,
     trainingFocus: worstMoment
-      ? "Train tactics around hanging pieces, forcing checks, and candidate move comparison."
-      : "Keep practicing opening development, king safety, and clean endgame conversion.",
+      ? "Тренируйте поиск ходов-кандидатов, тактику на висящие фигуры и проверку форсированных ответов."
+      : "Продолжайте развивать дебютные принципы, безопасность короля и технику реализации.",
     summary: worstMoment
-      ? `AI Coach: the critical moment was ${worstMoment.moveNumber}. ${worstMoment.san}. It changed the material balance or tactical safety. A better habit is to check forcing replies before committing.`
-      : "AI Coach: no major tactical collapse was detected. Keep improving piece activity and conversion technique.",
+      ? `Ключевой перелом произошел на ходу ${worstMoment.moveNumber}: ${worstMoment.san}. Перед фиксацией хода стоило проверить форсированные ответы соперника.`
+      : "Крупного тактического обвала не найдено. Улучшайте активность фигур и технику реализации преимущества.",
   };
 }

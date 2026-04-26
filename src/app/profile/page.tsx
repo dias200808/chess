@@ -10,16 +10,16 @@ import { percentage } from "@/lib/utils";
 export default function ProfilePage() {
   const { user, updateProfile } = useAuth();
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ username: user?.username ?? "", city: user?.city ?? "" });
+  const [draft, setDraft] = useState({ username: user?.username ?? "" });
 
   if (!user) {
     return (
       <Card className="mx-auto max-w-xl">
-        <h1 className="text-3xl font-black">Profile is protected</h1>
-        <p className="mt-2 text-muted-foreground">Register or log in to view rating, stats, and recent games.</p>
+        <h1 className="text-3xl font-black">Профиль защищён</h1>
+        <p className="mt-2 text-muted-foreground">Зарегистрируйтесь или войдите, чтобы видеть рейтинг, статистику и последние партии.</p>
         <div className="mt-5 flex gap-3">
-          <LinkButton href="/register">Register</LinkButton>
-          <LinkButton href="/login" variant="secondary">Log in</LinkButton>
+          <LinkButton href="/register">Регистрация</LinkButton>
+          <LinkButton href="/login" variant="secondary">Войти</LinkButton>
         </div>
       </Card>
     );
@@ -45,26 +45,24 @@ export default function ProfilePage() {
         <h1 className="mt-5 text-3xl font-black">{user.username}</h1>
         <p className="text-muted-foreground">{user.email}</p>
         <div className="mt-4 flex flex-wrap gap-2">
-          <Badge>{user.city}</Badge>
-          <Badge>{user.rating} rating</Badge>
+          <Badge>{user.rating} рейтинг</Badge>
         </div>
 
         {editing ? (
           <div className="mt-6 grid gap-3">
-            <Field label="Username" value={draft.username} onChange={(event) => setDraft({ ...draft, username: event.target.value })} />
-            <Field label="City" value={draft.city} onChange={(event) => setDraft({ ...draft, city: event.target.value })} />
-            <Button onClick={saveProfile}>Save changes</Button>
+            <Field label="Имя пользователя" value={draft.username} onChange={(event) => setDraft({ ...draft, username: event.target.value })} />
+            <Button onClick={saveProfile}>Сохранить</Button>
           </div>
         ) : (
           <Button
             className="mt-6"
             variant="secondary"
             onClick={() => {
-              setDraft({ username: user.username, city: user.city });
+              setDraft({ username: user.username });
               setEditing(true);
             }}
           >
-            Edit profile
+            Редактировать профиль
           </Button>
         )}
       </Card>
@@ -72,10 +70,10 @@ export default function ProfilePage() {
       <div className="grid gap-6">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            ["Games", user.gamesCount],
-            ["Wins", user.wins],
-            ["Losses", user.losses],
-            ["Draws", user.draws],
+            ["Партии", user.gamesCount],
+            ["Победы", user.wins],
+            ["Поражения", user.losses],
+            ["Ничьи", user.draws],
           ].map(([label, value]) => (
             <Card key={label}>
               <p className="text-sm text-muted-foreground">{label}</p>
@@ -85,14 +83,14 @@ export default function ProfilePage() {
         </div>
 
         <Card>
-          <h2 className="text-xl font-black">Progress</h2>
+          <h2 className="text-xl font-black">Прогресс</h2>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <div className="rounded-3xl bg-muted p-5">
-              <p className="text-sm text-muted-foreground">Win percentage</p>
+              <p className="text-sm text-muted-foreground">Процент побед</p>
               <p className="font-mono text-4xl font-black">{percentage(user.wins, user.gamesCount)}%</p>
             </div>
             <div className="rounded-3xl bg-muted p-5">
-              <p className="text-sm text-muted-foreground">Solved puzzles</p>
+              <p className="text-sm text-muted-foreground">Решено задач</p>
               <p className="font-mono text-4xl font-black">{solvedPuzzles}</p>
             </div>
           </div>
@@ -100,8 +98,8 @@ export default function ProfilePage() {
 
         <Card>
           <div className="flex items-center justify-between gap-4">
-            <h2 className="text-xl font-black">Recent games</h2>
-            <Link className="text-sm font-semibold text-primary" href="/history">View all</Link>
+            <h2 className="text-xl font-black">Последние партии</h2>
+            <Link className="text-sm font-semibold text-primary" href="/history">Все партии</Link>
           </div>
           <div className="mt-4 grid gap-3">
             {games.slice(0, 5).map((game) => (
@@ -110,7 +108,7 @@ export default function ProfilePage() {
                 <Badge>{game.result}</Badge>
               </div>
             ))}
-            {!games.length ? <p className="text-sm text-muted-foreground">No saved games yet.</p> : null}
+            {!games.length ? <p className="text-sm text-muted-foreground">Пока нет сохранённых партий.</p> : null}
           </div>
         </Card>
       </div>

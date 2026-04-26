@@ -3,10 +3,12 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { UserProfile } from "@/lib/types";
 import {
+  getLocalCredentialByEmail,
   getProfiles,
   getSessionUserId,
   saveProfiles,
   setSessionUserId,
+  upsertLocalCredential,
 } from "@/lib/storage";
 import { getSupabaseClient } from "@/lib/supabase";
 import {
@@ -22,7 +24,6 @@ type AuthContextValue = {
   register: (input: {
     email: string;
     username: string;
-    city: string;
     password: string;
   }) => Promise<void>;
   login: (email: string, password?: string) => Promise<void>;
@@ -39,6 +40,15 @@ function initials(name: string) {
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
+    .join("");
+}
+
+async function hashPassword(password: string) {
+  const normalized = password.trim();
+  const data = new TextEncoder().encode(normalized);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 }
 
@@ -94,22 +104,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function register(input: {
     email: string;
     username: string;
-    city: string;
     password: string;
   }) {
-    if (!input.email || !input.username || !input.password) {
-      throw new Error("Email, username, and password are required.");
+    const email = input.email.trim().toLowerCase();
+    const username = input.username.trim();
+    const password = input.password.trim();
+
+    if (!email || !username || !password) {
+      throw new Error("Заполните email, имя пользователя и пароль.");
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new Error("Введите корректный email.");
+    }
+
+    if (username.length < 2) {
+      throw new Error("Имя пользователя должно быть не короче 2 символов.");
+    }
+
+    if (password.length < 8) {
+      throw new Error("Пароль должен содержать минимум 8 символов.");
     }
 
     const supabase = getSupabaseClient();
     if (supabase) {
       const { data, error } = await supabase.auth.signUp({
-        email: input.email,
-        password: input.password,
+        email,
+        password,
         options: {
           data: {
-            username: input.username,
-            city: input.city || "Unknown",
+            username,
           },
         },
       });
@@ -117,10 +141,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!data.user) return;
       const profile = await upsertProfileToSupabase({
         id: data.user.id,
-        email: input.email,
-        username: input.username,
-        city: input.city || "Unknown",
-        avatar: initials(input.username),
+        email,
+        username,
+        city: "",
+        avatar: initials(username),
         rating: 1200,
         gamesCount: 0,
         wins: 0,
@@ -136,41 +160,56 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     const existing = profiles.find(
-      (profile) => profile.email.toLowerCase() === input.email.toLowerCase(),
+      (profile) => profile.email.toLowerCase() === email,
     );
-    if (existing) {
-      setSessionUserId(existing.id);
-      setUserId(existing.id);
-      return;
+    const passwordHash = await hashPassword(password);
+    const credential = getLocalCredentialByEmail(email);
+
+    if (existing && credential) {
+      throw new Error("Аккаунт с таким email уже существует. Войдите в систему.");
     }
 
-    const profile: UserProfile = {
-      id: crypto.randomUUID(),
-      email: input.email,
-      username: input.username,
-      city: input.city || "Unknown",
-      avatar: initials(input.username) || "K",
-      rating: 1200,
-      gamesCount: 0,
-      wins: 0,
-      losses: 0,
-      draws: 0,
-      createdAt: new Date().toISOString(),
-    };
-    const next = [profile, ...profiles];
+    const profile: UserProfile = existing
+      ? {
+          ...existing,
+          username,
+          city: existing.city ?? "",
+          avatar: initials(username) || existing.avatar || "K",
+        }
+      : {
+          id: crypto.randomUUID(),
+          email,
+          username,
+          city: "",
+          avatar: initials(username) || "K",
+          rating: 1200,
+          gamesCount: 0,
+          wins: 0,
+          losses: 0,
+          draws: 0,
+          createdAt: new Date().toISOString(),
+        };
+
+    const next = [profile, ...profiles.filter((item) => item.id !== profile.id)];
     setProfiles(next);
     saveProfiles(next);
+    upsertLocalCredential({ email, passwordHash });
     setSessionUserId(profile.id);
     setUserId(profile.id);
   }
 
   async function login(email: string, password?: string) {
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedPassword = password?.trim() ?? "";
     const supabase = getSupabaseClient();
     if (supabase) {
-      if (!password) throw new Error("Password is required.");
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (!normalizedPassword) throw new Error("Введите пароль.");
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password: normalizedPassword,
+      });
       if (error) throw error;
-      if (!data.user) throw new Error("No Supabase user returned.");
+      if (!data.user) throw new Error("Не удалось получить пользователя из Supabase.");
       const profile = await fetchProfileFromSupabase(data.user.id);
       if (profile) {
         setProfiles((current) => [profile, ...current.filter((item) => item.id !== profile.id)]);
@@ -181,10 +220,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     const existing = profiles.find(
-      (profile) => profile.email.toLowerCase() === email.toLowerCase(),
+      (profile) => profile.email.toLowerCase() === normalizedEmail,
     );
 
-    if (!existing) throw new Error("No local account found. Register first.");
+    if (!existing) throw new Error("Локальный аккаунт не найден. Сначала зарегистрируйтесь.");
+    if (!normalizedPassword) throw new Error("Введите пароль.");
+
+    const credential = getLocalCredentialByEmail(normalizedEmail);
+    if (!credential) {
+      throw new Error("Этот локальный аккаунт создан по старой схеме. Зарегистрируйтесь заново, чтобы включить пароль.");
+    }
+
+    const passwordHash = await hashPassword(normalizedPassword);
+    if (credential.passwordHash !== passwordHash) {
+      throw new Error("Неверный пароль.");
+    }
+
     setSessionUserId(existing.id);
     setUserId(existing.id);
   }
