@@ -469,7 +469,7 @@ export function ChessGame({
     },
     {
       label: "Хорошие",
-      value: countMoveTypes("best move", "excellent", "good move"),
+      value: countMoveTypes("checkmate", "best move", "excellent", "good move"),
     },
     {
       label: "Бриллианты",

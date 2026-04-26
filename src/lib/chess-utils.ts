@@ -42,6 +42,7 @@ export function summarizeMoveTypes(evaluations: GameAnalysis["evaluations"]) {
     "mistake",
     "blunder",
     "missed win",
+    "checkmate",
   ] satisfies GameAnalysis["evaluations"][number]["type"][];
 
   return order
@@ -70,6 +71,8 @@ export function moveTypeLabel(type: GameAnalysis["evaluations"][number]["type"])
       return "Зевок";
     case "missed win":
       return "Упущенная победа";
+    case "checkmate":
+      return "Мат";
     default:
       return type;
   }
@@ -88,14 +91,14 @@ export function classifyMoveQuality({
   materialSwing: number;
   playedSan: string;
 }): GameAnalysis["evaluations"][number]["type"] {
-  if (playedSan.includes("#")) return "best move";
+  if (playedSan.includes("#")) return "checkmate";
+  if (sideAdvantage > 450 && centipawnLoss >= 251) return "missed win";
   if (isBest && materialSwing <= -250 && centipawnLoss <= 20) return "brilliant";
-  if (isBest) return "best move";
-  if (centipawnLoss <= 18) return "excellent";
-  if (centipawnLoss <= 55) return "good move";
+  if (isBest && centipawnLoss <= 20) return "best move";
+  if (centipawnLoss <= 20) return "excellent";
+  if (centipawnLoss <= 60) return "good move";
   if (centipawnLoss <= 120) return "inaccuracy";
-  if (sideAdvantage > 450 && centipawnLoss >= 280) return "missed win";
-  if (centipawnLoss <= 260) return "mistake";
+  if (centipawnLoss <= 250) return "mistake";
   return "blunder";
 }
 
@@ -318,6 +321,7 @@ export function analyzeMoves(moves: string[]): GameAnalysis {
   const penalties = { w: 0, b: 0 };
 
   moves.forEach((san, index) => {
+    const fenBefore = chess.fen();
     const before = materialScore(chess.fen());
     const color = chess.turn();
     let move: Move | null = null;
@@ -350,14 +354,22 @@ export function analyzeMoves(moves: string[]): GameAnalysis {
     penalties[color] += penalty;
 
     evaluations.push({
+      ply: index + 1,
       moveNumber: Math.floor(index / 2) + 1,
+      color,
       san: move.san,
+      uci: `${move.from}${move.to}${move.promotion ?? ""}`,
       type,
       centipawnLoss,
       scoreBefore: before,
       scoreAfter: after,
+      fenBefore,
+      fenAfter: chess.fen(),
+      engine: "heuristic",
       note:
-        type === "brilliant"
+        type === "checkmate"
+          ? "Ход завершил партию матом."
+          : type === "brilliant"
           ? "Сильная идея с тактической точностью или осознанной жертвой."
           : type === "blunder"
             ? "После этого хода позиция резко ухудшилась."
@@ -373,8 +385,11 @@ export function analyzeMoves(moves: string[]): GameAnalysis {
     .filter((item) => ["blunder", "mistake", "missed win", "inaccuracy"].includes(item.type))
     .sort((a, b) => Math.abs(b.scoreAfter - b.scoreBefore) - Math.abs(a.scoreAfter - a.scoreBefore))[0];
   const bestMoment = [...evaluations]
-    .filter((item) => ["brilliant", "best move", "excellent", "good move"].includes(item.type))
+    .filter((item) => ["checkmate", "brilliant", "best move", "excellent", "good move"].includes(item.type))
     .sort((a, b) => Math.abs(b.scoreAfter - b.scoreBefore) - Math.abs(a.scoreAfter - a.scoreBefore))[0];
+  const keyMoments = evaluations
+    .filter((item) => ["checkmate", "blunder", "mistake", "missed win"].includes(item.type))
+    .slice(0, 8);
 
   const whiteAccuracy = Math.max(35, 100 - penalties.w);
   const blackAccuracy = Math.max(35, 100 - penalties.b);
@@ -385,6 +400,7 @@ export function analyzeMoves(moves: string[]): GameAnalysis {
     evaluations,
     bestMoment,
     worstMoment,
+    keyMoments,
     trainingFocus: worstMoment
       ? "Тренируйте поиск ходов-кандидатов, тактику на висящие фигуры и проверку форсированных ответов."
       : "Продолжайте развивать дебютные принципы, безопасность короля и технику реализации.",

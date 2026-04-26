@@ -55,8 +55,11 @@ export type SavedGame = {
 };
 
 export type MoveEvaluation = {
+  ply: number;
   moveNumber: number;
+  color: "w" | "b";
   san: string;
+  uci?: string;
   type:
     | "brilliant"
     | "best move"
@@ -65,12 +68,18 @@ export type MoveEvaluation = {
     | "inaccuracy"
     | "mistake"
     | "blunder"
-    | "missed win";
+    | "missed win"
+    | "checkmate";
   centipawnLoss?: number;
   scoreBefore: number;
   scoreAfter: number;
+  mateBefore?: number;
+  mateAfter?: number;
   note: string;
   bestMove?: string;
+  bestMoveUci?: string;
+  fenBefore?: string;
+  fenAfter?: string;
   engine?: "heuristic" | "stockfish";
 };
 
@@ -81,6 +90,7 @@ export type GameAnalysis = {
   evaluations: MoveEvaluation[];
   bestMoment?: MoveEvaluation;
   worstMoment?: MoveEvaluation;
+  keyMoments?: MoveEvaluation[];
   trainingFocus: string;
 };
 
