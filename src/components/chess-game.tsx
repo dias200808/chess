@@ -359,6 +359,17 @@ export function ChessGame({
       : hoverSquare
         ? squareTargets(chess.fen(), hoverSquare)
         : [];
+  const targetStyle = (target: Square) =>
+    chess.get(target)
+      ? {
+          background:
+            "radial-gradient(circle, transparent 42%, rgba(248, 113, 113, 0.95) 44%, rgba(248, 113, 113, 0.95) 56%, transparent 58%)",
+          boxShadow: "inset 0 0 0 4px rgba(248, 113, 113, 0.7)",
+        }
+      : {
+          background:
+            "radial-gradient(circle, rgba(14, 165, 233, 0.92) 16%, rgba(255, 255, 255, 0.9) 18%, transparent 23%)",
+        };
   const squareStyles = Object.fromEntries([
     ...(settings.lastMoveHighlight && lastMove
       ? [
@@ -369,10 +380,7 @@ export function ChessGame({
     ...(selectedSquare ? [[selectedSquare, { background: "rgba(96, 197, 141, 0.55)" }]] : []),
     ...(settings.legalMoves ? targets : []).map((target) => [
       target,
-      {
-        background:
-          "radial-gradient(circle, rgba(14, 165, 233, 0.92) 16%, rgba(255, 255, 255, 0.9) 18%, transparent 23%)",
-      },
+      targetStyle(target),
     ]),
   ]);
 
@@ -625,11 +633,9 @@ export function ChessGame({
     };
 
     saveGame(game);
-    try {
-      await saveGameToSupabase(game);
-    } catch {
+    void saveGameToSupabase(game).catch(() => {
       // Keep the local save if Supabase is unavailable or policies reject anonymous games.
-    }
+    });
     setSavedId(id);
     if (markFinal) setFinalSaved(true);
     if (markFinal || savedRated) {
@@ -719,7 +725,7 @@ export function ChessGame({
 
   const reviewCounts = summarizeMoveTypes(activeAnalysis.evaluations);
   const isReviewPending = isGameOver && moves.length >= 2 && Boolean(analysisProgress) && !postGameAnalysis;
-  const canOpenReview = isGameOver && moves.length > 0 && !isReviewPending;
+  const canOpenReview = isGameOver && moves.length > 0;
   const activeSide = chess.turn() === "w" ? "white" : "black";
   const canOfferDraw = !isGameOver && !drawOfferedBy && !isBotTurn;
   const canRespondToDraw = Boolean(

@@ -97,6 +97,15 @@ alter table public.rooms add column if not exists host_key text;
 alter table public.rooms add column if not exists guest_key text;
 alter table public.rooms add column if not exists host_rating integer;
 alter table public.rooms add column if not exists guest_rating integer;
+alter table public.rooms add column if not exists white_time_ms integer;
+alter table public.rooms add column if not exists black_time_ms integer;
+alter table public.rooms add column if not exists increment_seconds integer not null default 0;
+alter table public.rooms add column if not exists last_move_at timestamptz;
+alter table public.rooms add column if not exists white_connected_at timestamptz;
+alter table public.rooms add column if not exists black_connected_at timestamptz;
+alter table public.rooms add column if not exists draw_offered_by text;
+alter table public.rooms add column if not exists end_reason text;
+alter table public.rooms add column if not exists rated boolean not null default false;
 alter table public.profiles add column if not exists country text default 'Unknown';
 alter table public.profiles add column if not exists bullet_rating integer not null default 1200;
 alter table public.profiles add column if not exists blitz_rating integer not null default 1200;
@@ -163,6 +172,34 @@ create policy "Anyone can update guest rooms"
   on public.rooms for update
   using (white_user_id is null and black_user_id is null)
   with check (white_user_id is null and black_user_id is null);
+
+create or replace function public.prevent_unsafe_room_client_update()
+returns trigger
+language plpgsql
+as $$
+begin
+  if auth.role() = 'service_role' then
+    return new;
+  end if;
+
+  if new.moves is distinct from old.moves
+    or new.current_position is distinct from old.current_position
+    or new.result is distinct from old.result
+    or new.end_reason is distinct from old.end_reason
+    or new.white_time_ms is distinct from old.white_time_ms
+    or new.black_time_ms is distinct from old.black_time_ms
+    or new.draw_offered_by is distinct from old.draw_offered_by then
+    raise exception 'Room gameplay updates must go through the server API';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists prevent_unsafe_room_client_update on public.rooms;
+create trigger prevent_unsafe_room_client_update
+  before update on public.rooms
+  for each row execute function public.prevent_unsafe_room_client_update();
 
 create policy "Users can manage own puzzle progress"
   on public.puzzle_progress for all using (auth.uid() = user_id);

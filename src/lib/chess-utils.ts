@@ -275,6 +275,20 @@ function randomMoveOrBest<T>(items: T[], fallback: T) {
   return items.length ? randomChoice(items) : fallback;
 }
 
+function movesInsideLossBand(
+  scoredMoves: { move: Move; score: number }[],
+  minLoss: number,
+  maxLoss: number,
+) {
+  const bestScore = scoredMoves[0]?.score ?? 0;
+  return scoredMoves
+    .filter((item) => {
+      const loss = bestScore - item.score;
+      return loss >= minLoss && loss <= maxLoss;
+    })
+    .map((item) => item.move);
+}
+
 export function chooseBotMove(fen: string, difficulty: BotDifficulty) {
   const chess = new Chess(fen);
   const moves = chess.moves({ verbose: true });
@@ -300,16 +314,14 @@ export function chooseBotMove(fen: string, difficulty: BotDifficulty) {
 
   if (Math.random() < profile.blunderChance) {
     return randomMoveOrBest(
-      scoredMoves.slice(Math.ceil(scoredMoves.length * 0.55)).map((item) => item.move),
+      movesInsideLossBand(scoredMoves, 260, 850),
       scoredMoves[0].move,
     );
   }
 
   if (Math.random() < profile.mistakeChance) {
     return randomMoveOrBest(
-      scoredMoves
-        .slice(1, Math.max(2, Math.ceil(scoredMoves.length * 0.45)))
-        .map((item) => item.move),
+      movesInsideLossBand(scoredMoves, 70, 260),
       scoredMoves[0].move,
     );
   }

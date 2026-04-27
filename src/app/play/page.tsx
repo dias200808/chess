@@ -17,6 +17,7 @@ import {
   joinQuickMatchRoom,
 } from "@/lib/supabase-data";
 import { ratingForProfile, ratingTypeForTimeControl } from "@/lib/rating";
+import { getOnlinePlayerKey, roomSideKey } from "@/lib/online-player";
 
 function StartTile({
   title,
@@ -45,19 +46,6 @@ function StartTile({
   );
 }
 
-function guestPlayerKey() {
-  const key = "knightly-guest-player-key";
-  const existing = localStorage.getItem(key);
-  if (existing) return existing;
-  const next = `guest:${crypto.randomUUID()}`;
-  localStorage.setItem(key, next);
-  return next;
-}
-
-function roomSideKey(roomId: string) {
-  return `knightly-room:${roomId}:side`;
-}
-
 function PlayPageInner() {
   const params = useSearchParams();
   const router = useRouter();
@@ -81,7 +69,7 @@ function PlayPageInner() {
     setQuickMessage("Searching for an opponent...");
 
     try {
-      const playerKey = user ? `user:${user.id}` : guestPlayerKey();
+      const playerKey = getOnlinePlayerKey(user?.id);
       const waitingRoom = await findWaitingQuickRoom({
         timeControl: timeControl.id,
         playerKey,

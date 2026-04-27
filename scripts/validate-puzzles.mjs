@@ -4,7 +4,7 @@ import path from "node:path";
 
 const source = fs.readFileSync(path.join(process.cwd(), "src/lib/data.ts"), "utf8");
 const puzzlePattern =
-  /id: "([^"]+)"[\s\S]*?fen: "([^"]+)"[\s\S]*?bestMove: "([^"]+)"([\s\S]*?)(?=\n  \{|\n\];)/g;
+  /id: "([^"]+)"[\s\S]*?category: "([^"]+)"[\s\S]*?fen: "([^"]+)"[\s\S]*?bestMove: "([^"]+)"([\s\S]*?)(?=\n  \{|\n\];)/g;
 
 function kingSquare(chess, color) {
   return SQUARES.find((square) => {
@@ -17,7 +17,7 @@ let failed = 0;
 let match;
 
 while ((match = puzzlePattern.exec(source))) {
-  const [, id, fen, bestMove, rest] = match;
+  const [, id, category, fen, bestMove, rest] = match;
   const lineMatch = /line: \[([^\]]+)\]/.exec(rest);
   const line = lineMatch
     ? [...lineMatch[1].matchAll(/"([^"]+)"/g)].map((item) => item[1])
@@ -44,6 +44,12 @@ while ((match = puzzlePattern.exec(source))) {
         to: uci.slice(2, 4),
         promotion: uci[4] || "q",
       });
+    }
+
+    if (category === "mate in 1" || category === "mate in 2") {
+      if (!chess.isCheckmate()) {
+        throw new Error(`${id} is labeled as mate puzzle, but the solution line does not end in checkmate`);
+      }
     }
 
     console.log(`OK ${id}: ${line.join(" ")}`);

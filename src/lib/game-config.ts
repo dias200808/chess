@@ -1,6 +1,6 @@
 import type { TimeControl } from "@/lib/types";
 
-export const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
+export const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 export const timeControlPresets: TimeControl[] = [
   { id: "no-time", label: "No time", initialSeconds: null, incrementSeconds: 0 },

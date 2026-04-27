@@ -6,17 +6,18 @@ import { Chess, type Square } from "chess.js";
 import { CheckCircle2, Copy, Link as LinkIcon, Loader2, Swords, Users } from "lucide-react";
 import { BoardStagePreview } from "@/components/board-stage-preview";
 import { Chessboard } from "@/components/client-chessboard";
+import { useAuth } from "@/components/auth-provider";
 import { Badge, Button, Card, SelectField } from "@/components/ui";
 import type { Room } from "@/lib/types";
 import { getGameResult, squareTargets } from "@/lib/chess-utils";
 import { getTimeControlPreset, timeControlPresets } from "@/lib/game-config";
+import { getOnlinePlayerKey, roomSideKey } from "@/lib/online-player";
 import {
   createGuestRoomInSupabase,
   fetchRoomFromSupabase,
   isSupabaseConfigured,
   joinGuestRoomInSupabase,
   subscribeToRoom,
-  updateRoomMovesInSupabase,
 } from "@/lib/supabase-data";
 
 type OnlineSide = "white" | "black" | "spectator";
@@ -33,10 +34,6 @@ function replay(moves: string[]) {
   return chess;
 }
 
-function roomSideKey(roomId: string) {
-  return `knightly-room:${roomId}:side`;
-}
-
 function sideLabel(side: OnlineSide | null) {
   if (side === "white") return "White";
   if (side === "black") return "Black";
@@ -44,17 +41,34 @@ function sideLabel(side: OnlineSide | null) {
   return "Not joined";
 }
 
+function formatClock(ms?: number | null) {
+  if (ms === null || ms === undefined) return "--:--";
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function isStale(timestamp: string | null | undefined, nowMs: number) {
+  if (!nowMs) return false;
+  if (!timestamp) return true;
+  return nowMs - new Date(timestamp).getTime() > 20_000;
+}
+
 function FriendClient() {
   const params = useSearchParams();
   const router = useRouter();
+  const { user } = useAuth();
   const [room, setRoom] = useState<Room | null>(null);
   const [moves, setMoves] = useState<string[]>([]);
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
+  const [hoverSquare, setHoverSquare] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [timeControlId, setTimeControlId] = useState("10-0");
   const [playerSide, setPlayerSide] = useState<OnlineSide | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [isLoadingRoom, setIsLoadingRoom] = useState(false);
+  const [nowMs, setNowMs] = useState(0);
   const roomId = params.get("room");
   const canUseRealtime = isSupabaseConfigured();
   const timeControl = getTimeControlPreset(room?.timeControl ?? timeControlId);
@@ -62,11 +76,39 @@ function FriendClient() {
   const chess = useMemo(() => replay(moves), [moves]);
   const result = getGameResult(chess);
   const selectedTargets = selectedSquare ? squareTargets(chess.fen(), selectedSquare) : [];
+  const hoverTargets =
+    !selectedSquare && hoverSquare && canMovePiece(hoverSquare)
+      ? squareTargets(chess.fen(), hoverSquare)
+      : [];
+  const visibleTargets = selectedSquare ? selectedTargets : hoverTargets;
   const origin = typeof window === "undefined" ? "" : window.location.origin;
   const inviteLink = room?.link || (roomId && origin ? `${origin}/friend?room=${roomId}` : "");
-  const isPlayableRoom = room?.status === "ready" && result.result === "*";
+  const activeRoomId = room?.id;
+  const roomResult = room?.result && room.result !== "*" ? room.result : result.result;
+  const isPlayableRoom = room?.status === "ready" && roomResult === "*";
   const currentTurnSide = chess.turn() === "w" ? "white" : "black";
-  const turnText = result.result === "*" ? `${currentTurnSide === "white" ? "White" : "Black"} to move` : result.label;
+  const turnText =
+    room?.endReason ??
+    (roomResult === "*" ? `${currentTurnSide === "white" ? "White" : "Black"} to move` : result.label);
+  const opponentDisconnected =
+    room?.status === "ready" &&
+    playerSide !== "spectator" &&
+    (playerSide === "white" ? isStale(room.blackConnectedAt, nowMs) : isStale(room.whiteConnectedAt, nowMs));
+
+  function liveClock(side: "white" | "black") {
+    if (!room) return null;
+    const base = side === "white" ? room.whiteTimeMs : room.blackTimeMs;
+    if (base === null || base === undefined) return null;
+    if (room.status !== "ready" || roomResult !== "*" || currentTurnSide !== side || !room.lastMoveAt) {
+      return base;
+    }
+    return Math.max(0, base - Math.max(0, nowMs - new Date(room.lastMoveAt).getTime()));
+  }
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (!roomId) return;
@@ -102,13 +144,20 @@ function FriendClient() {
 
       let side = localStorage.getItem(roomSideKey(activeRoom.id)) as OnlineSide | null;
       let joinedRoom = activeRoom;
+      const playerKey = getOnlinePlayerKey(user?.id);
 
       if (!side) {
-        if (activeRoom.status === "waiting") {
+        if (activeRoom.hostKey === playerKey) {
+          side = "white";
+          localStorage.setItem(roomSideKey(activeRoom.id), side);
+        } else if (activeRoom.guestKey === playerKey) {
+          side = "black";
+          localStorage.setItem(roomSideKey(activeRoom.id), side);
+        } else if (activeRoom.status === "waiting") {
           side = "black";
           localStorage.setItem(roomSideKey(activeRoom.id), side);
           try {
-            joinedRoom = (await joinGuestRoomInSupabase(activeRoom.id)) ?? activeRoom;
+            joinedRoom = (await joinGuestRoomInSupabase(activeRoom.id, playerKey)) ?? activeRoom;
           } catch {
             if (!disposed) setMessage("Could not join the room. Check Supabase update policy.");
             joinedRoom = activeRoom;
@@ -139,7 +188,33 @@ function FriendClient() {
       disposed = true;
       if (channel) channel.unsubscribe();
     };
-  }, [canUseRealtime, roomId]);
+  }, [canUseRealtime, roomId, user?.id]);
+
+  useEffect(() => {
+    if (!activeRoomId || playerSide === "spectator" || !playerSide) return;
+    let disposed = false;
+
+    async function pingPresence() {
+      try {
+        const response = await fetch(`/api/rooms/${activeRoomId}/presence`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ playerKey: getOnlinePlayerKey(user?.id) }),
+        });
+        const payload = (await response.json()) as { room?: Room };
+        if (!disposed && payload.room) setRoom(payload.room);
+      } catch {
+        // The realtime subscription still keeps the game usable if one heartbeat fails.
+      }
+    }
+
+    void pingPresence();
+    const timer = window.setInterval(() => void pingPresence(), 8000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [activeRoomId, playerSide, user?.id]);
 
   async function createRoom() {
     if (!canUseRealtime) {
@@ -151,7 +226,7 @@ function FriendClient() {
     setMessage("");
     let created: Room | null = null;
     try {
-      created = await createGuestRoomInSupabase(timeControlId);
+      created = await createGuestRoomInSupabase(timeControlId, getOnlinePlayerKey(user?.id));
     } catch {
       setMessage("Could not create the room. Run the guest room policies in supabase/schema.sql.");
     }
@@ -176,6 +251,27 @@ function FriendClient() {
     setMessage("Invite link copied.");
   }
 
+  async function sendRoomAction(action: "resign" | "offer_draw" | "accept_draw" | "decline_draw" | "cancel") {
+    if (!room || !playerSide || playerSide === "spectator") return;
+    try {
+      const response = await fetch(`/api/rooms/${room.id}/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ playerKey: getOnlinePlayerKey(user?.id), action }),
+      });
+      const payload = (await response.json()) as { room?: Room; error?: string };
+      if (!response.ok || !payload.room) {
+        setMessage(payload.error ?? "Action rejected by server.");
+        return;
+      }
+      setRoom(payload.room);
+      setMoves(payload.room.moves ?? []);
+      setMessage("");
+    } catch {
+      setMessage("Could not send action to server.");
+    }
+  }
+
   function canMovePiece(square: string) {
     if (!room || !isPlayableRoom || playerSide === "spectator") return false;
     if (playerSide !== currentTurnSide) return false;
@@ -188,21 +284,29 @@ function FriendClient() {
     if (!targetSquare || !room || !canMovePiece(sourceSquare)) return false;
     if (!squareTargets(chess.fen(), sourceSquare).includes(targetSquare as Square)) return false;
 
-    const next = replay(moves);
     try {
-      const move = next.move({ from: sourceSquare, to: targetSquare, promotion: "q" });
-      const nextMoves = [...moves, move.san];
-      setMoves(nextMoves);
+      const response = await fetch(`/api/rooms/${room.id}/move`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          playerKey: getOnlinePlayerKey(user?.id),
+          from: sourceSquare,
+          to: targetSquare,
+          promotion: "q",
+        }),
+      });
+      const payload = (await response.json()) as { room?: Room; error?: string };
+      if (!response.ok || !payload.room) {
+        setMessage(payload.error ?? "Move rejected by server.");
+        return false;
+      }
+      setRoom(payload.room);
+      setMoves(payload.room.moves ?? []);
       setSelectedSquare(null);
-      const nextRoom = await updateRoomMovesInSupabase(
-        room.id,
-        nextMoves,
-        next.fen(),
-        getGameResult(next).result,
-      );
-      if (nextRoom) setRoom(nextRoom);
+      setHoverSquare(null);
       return true;
     } catch {
+      setMessage("Could not send move to server.");
       return false;
     }
   }
@@ -215,14 +319,23 @@ function FriendClient() {
     setSelectedSquare(canMovePiece(square) ? square : null);
   }
 
+  const targetStyle = (target: Square) =>
+    chess.get(target)
+      ? {
+          background:
+            "radial-gradient(circle, transparent 42%, rgba(248, 113, 113, 0.95) 44%, rgba(248, 113, 113, 0.95) 56%, transparent 58%)",
+          boxShadow: "inset 0 0 0 4px rgba(248, 113, 113, 0.7)",
+        }
+      : {
+          background:
+            "radial-gradient(circle, rgba(14, 165, 233, 0.92) 16%, rgba(255, 255, 255, 0.9) 18%, transparent 23%)",
+        };
+
   const squareStyles = Object.fromEntries([
     ...(selectedSquare ? [[selectedSquare, { background: "rgba(34, 211, 238, 0.42)" }]] : []),
-    ...selectedTargets.map((target) => [
+    ...visibleTargets.map((target) => [
       target,
-      {
-        background:
-          "radial-gradient(circle, rgba(14, 165, 233, 0.92) 16%, rgba(255, 255, 255, 0.9) 18%, transparent 23%)",
-      },
+      targetStyle(target),
     ]),
   ]);
 
@@ -310,6 +423,21 @@ function FriendClient() {
               </div>
               <Badge>{timeControl.label} • unrated</Badge>
             </div>
+            <div className="mb-4 grid grid-cols-2 gap-3">
+              <div className={`rounded-2xl p-3 ${currentTurnSide === "black" && isPlayableRoom ? "bg-primary/20 ring-1 ring-primary/40" : "bg-muted"}`}>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Black</p>
+                <p className="font-mono text-2xl font-black">{formatClock(liveClock("black"))}</p>
+              </div>
+              <div className={`rounded-2xl p-3 ${currentTurnSide === "white" && isPlayableRoom ? "bg-primary/20 ring-1 ring-primary/40" : "bg-muted"}`}>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">White</p>
+                <p className="font-mono text-2xl font-black">{formatClock(liveClock("white"))}</p>
+              </div>
+            </div>
+            {opponentDisconnected ? (
+              <p className="mb-4 rounded-2xl border border-red-400/30 bg-red-500/10 p-3 text-sm font-semibold text-red-100">
+                Opponent disconnected. Waiting for reconnect...
+              </p>
+            ) : null}
             <div className="mx-auto max-w-[min(82vh,720px)]">
               <Chessboard
                 options={{
@@ -323,9 +451,8 @@ function FriendClient() {
                     return true;
                   },
                   onSquareClick,
-                  onMouseOverSquare: ({ square }) => {
-                    if (canMovePiece(square)) setSelectedSquare(square);
-                  },
+                  onMouseOverSquare: ({ square }) => setHoverSquare(square),
+                  onMouseOutSquare: () => setHoverSquare(null),
                   squareStyles,
                   boardStyle: {
                     borderRadius: "1.5rem",
@@ -371,6 +498,50 @@ function FriendClient() {
               </div>
               {message ? <p className="mt-3 text-sm text-muted-foreground">{message}</p> : null}
               {isLoadingRoom ? <p className="mt-3 text-sm text-muted-foreground">Loading room...</p> : null}
+            </Card>
+
+            <Card>
+              <h2 className="text-lg font-black">Game controls</h2>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                {room.status === "waiting" && playerSide === "white" ? (
+                  <Button variant="danger" onClick={() => void sendRoomAction("cancel")}>
+                    Cancel Search
+                  </Button>
+                ) : null}
+                <Button
+                  variant="danger"
+                  onClick={() => void sendRoomAction("resign")}
+                  disabled={!isPlayableRoom || playerSide === "spectator"}
+                >
+                  Resign
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => void sendRoomAction("offer_draw")}
+                  disabled={!isPlayableRoom || playerSide === "spectator" || Boolean(room.drawOfferedBy)}
+                >
+                  Offer Draw
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => void sendRoomAction("accept_draw")}
+                  disabled={!isPlayableRoom || !room.drawOfferedBy || room.drawOfferedBy === playerSide}
+                >
+                  Accept Draw
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => void sendRoomAction("decline_draw")}
+                  disabled={!isPlayableRoom || !room.drawOfferedBy || room.drawOfferedBy === playerSide}
+                >
+                  Decline Draw
+                </Button>
+              </div>
+              {room.drawOfferedBy ? (
+                <p className="mt-3 rounded-2xl bg-muted p-3 text-sm font-semibold">
+                  Draw offered by {room.drawOfferedBy}.
+                </p>
+              ) : null}
             </Card>
 
             <Card className="max-h-[34rem] overflow-auto">

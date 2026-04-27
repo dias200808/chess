@@ -3,7 +3,7 @@
 import { Chessboard } from "@/components/client-chessboard";
 import { Badge } from "@/components/ui";
 
-const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
+const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 function initials(value: string) {
   return value

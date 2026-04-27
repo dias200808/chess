@@ -188,6 +188,14 @@ export type PuzzleProgress = {
   puzzleRating?: number;
   bestPuzzleRating?: number;
   lastSolvedAt?: string;
+  failed?: number;
+  solvedCount?: number;
+  usedHint?: boolean;
+  usedSolution?: boolean;
+  solvingTimeMs?: number;
+  ratingChange?: number;
+  lastFailedAt?: string;
+  puzzleMode?: string;
 };
 
 export type Room = {
@@ -205,6 +213,15 @@ export type Room = {
   guestKey?: string;
   hostRating?: number;
   guestRating?: number;
+  whiteTimeMs?: number | null;
+  blackTimeMs?: number | null;
+  incrementSeconds?: number;
+  lastMoveAt?: string | null;
+  whiteConnectedAt?: string | null;
+  blackConnectedAt?: string | null;
+  drawOfferedBy?: "white" | "black" | null;
+  endReason?: string;
+  rated?: boolean;
   createdAt: string;
   updatedAt?: string;
 };

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Bot, ChevronLeft, Cpu, Swords, Zap } from "lucide-react";
 import { BoardStagePreview } from "@/components/board-stage-preview";
 import { ChessGame } from "@/components/chess-game";
@@ -17,6 +17,15 @@ export default function BotPage() {
   const [started, setStarted] = useState(false);
   const profile = getBotProfile(difficulty);
   const timeControl = getTimeControlPreset(timeControlId);
+
+  useEffect(() => {
+    function resetBotPage(event: Event) {
+      if ((event as CustomEvent<string>).detail === "/bot") setStarted(false);
+    }
+
+    window.addEventListener("knightly:navigate-home", resetBotPage);
+    return () => window.removeEventListener("knightly:navigate-home", resetBotPage);
+  }, []);
 
   function chooseColor(value: "white" | "black" | "random") {
     setColorChoice(value);

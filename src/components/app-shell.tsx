@@ -71,7 +71,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Link
                 key={item.href}
                 href={item.href}
-                onClick={() => setOpen(false)}
+                onClick={() => {
+                  if (pathname === item.href && typeof window !== "undefined") {
+                    window.dispatchEvent(
+                      new CustomEvent("knightly:navigate-home", { detail: item.href }),
+                    );
+                  }
+                  setOpen(false);
+                }}
                 className={cn(
                   "flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-semibold text-[#d7d1c6] transition hover:bg-white/6 hover:text-white",
                   pathname === item.href &&

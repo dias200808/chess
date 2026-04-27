@@ -1,8 +1,19 @@
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import type { GameAnalysis, GameMode, GameResult, PuzzleProgress, Room, SavedGame, UserProfile } from "@/lib/types";
 import { getSupabaseClient } from "@/lib/supabase";
+import { getTimeControlPreset } from "@/lib/game-config";
 
-const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
+const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+function roomClock(timeControlId: string) {
+  const timeControl = getTimeControlPreset(timeControlId);
+  const baseMs = timeControl.initialSeconds === null ? null : timeControl.initialSeconds * 1000;
+  return {
+    white_time_ms: baseMs,
+    black_time_ms: baseMs,
+    increment_seconds: timeControl.incrementSeconds,
+  };
+}
 
 function avatarFor(username: string) {
   return username
@@ -240,7 +251,7 @@ export async function createRoomInSupabase(userId: string) {
   return mapRoom(data);
 }
 
-export async function createGuestRoomInSupabase(timeControl = "10-0") {
+export async function createGuestRoomInSupabase(timeControl = "10-0", hostKey?: string, hostRating?: number | null) {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
   const { data, error } = await supabase
@@ -251,8 +262,13 @@ export async function createGuestRoomInSupabase(timeControl = "10-0") {
       current_position: START_FEN,
       moves: [],
       status: "waiting",
+      result: "*",
       time_control: timeControl,
       match_type: "invite",
+      host_key: hostKey ?? null,
+      host_rating: hostRating ?? null,
+      rated: false,
+      ...roomClock(timeControl),
     })
     .select("*")
     .single();
@@ -309,10 +325,13 @@ export async function createQuickMatchRoom({
       current_position: START_FEN,
       moves: [],
       status: "waiting",
+      result: "*",
       time_control: timeControl,
       match_type: "quick",
       host_key: playerKey,
       host_rating: rating ?? null,
+      rated: Boolean(rating),
+      ...roomClock(timeControl),
     })
     .select("*")
     .single();
@@ -337,6 +356,8 @@ export async function joinQuickMatchRoom({
       status: "ready",
       guest_key: playerKey,
       guest_rating: rating ?? null,
+      result: "*",
+      last_move_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
     .eq("id", roomId)
@@ -361,12 +382,19 @@ export async function joinRoomInSupabase(roomId: string, userId: string) {
   return mapRoom(data);
 }
 
-export async function joinGuestRoomInSupabase(roomId: string) {
+export async function joinGuestRoomInSupabase(roomId: string, guestKey?: string, guestRating?: number | null) {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
   const { data, error } = await supabase
     .from("rooms")
-    .update({ status: "ready", updated_at: new Date().toISOString() })
+    .update({
+      status: "ready",
+      guest_key: guestKey ?? null,
+      guest_rating: guestRating ?? null,
+      result: "*",
+      last_move_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", roomId)
     .eq("status", "waiting")
     .select("*")
@@ -432,6 +460,15 @@ export function mapRoom(row: Record<string, unknown>): Room {
     guestKey: row.guest_key ? String(row.guest_key) : undefined,
     hostRating: row.host_rating === null || row.host_rating === undefined ? undefined : Number(row.host_rating),
     guestRating: row.guest_rating === null || row.guest_rating === undefined ? undefined : Number(row.guest_rating),
+    whiteTimeMs: row.white_time_ms === null || row.white_time_ms === undefined ? undefined : Number(row.white_time_ms),
+    blackTimeMs: row.black_time_ms === null || row.black_time_ms === undefined ? undefined : Number(row.black_time_ms),
+    incrementSeconds: Number(row.increment_seconds ?? 0),
+    lastMoveAt: row.last_move_at ? String(row.last_move_at) : undefined,
+    whiteConnectedAt: row.white_connected_at ? String(row.white_connected_at) : undefined,
+    blackConnectedAt: row.black_connected_at ? String(row.black_connected_at) : undefined,
+    drawOfferedBy: row.draw_offered_by ? (String(row.draw_offered_by) as Room["drawOfferedBy"]) : undefined,
+    endReason: row.end_reason ? String(row.end_reason) : undefined,
+    rated: Boolean(row.rated ?? false),
     createdAt: String(row.created_at ?? new Date().toISOString()),
     updatedAt: row.updated_at ? String(row.updated_at) : undefined,
   };
