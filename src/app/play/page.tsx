@@ -10,12 +10,7 @@ import { ChessGame } from "@/components/chess-game";
 import { getTimeControlPreset, timeControlPresets } from "@/lib/game-config";
 import { Badge, Button, LinkButton, SelectField } from "@/components/ui";
 import { useAuth } from "@/components/auth-provider";
-import {
-  createQuickMatchRoom,
-  findWaitingQuickRoom,
-  isSupabaseConfigured,
-  joinQuickMatchRoom,
-} from "@/lib/supabase-data";
+import { isSupabaseConfigured } from "@/lib/supabase-data";
 import { ratingForProfile, ratingTypeForTimeControl } from "@/lib/rating";
 import { getOnlinePlayerKey, roomSideKey } from "@/lib/online-player";
 
@@ -70,41 +65,32 @@ function PlayPageInner() {
 
     try {
       const playerKey = getOnlinePlayerKey(user?.id);
-      const waitingRoom = await findWaitingQuickRoom({
-        timeControl: timeControl.id,
-        playerKey,
-        rating: playerRating,
-      });
-
-      if (waitingRoom) {
-        const joinedRoom = await joinQuickMatchRoom({
-          roomId: waitingRoom.id,
+      const response = await fetch("/api/rooms/quick", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          timeControl: timeControl.id,
           playerKey,
           rating: playerRating,
-        });
-        if (joinedRoom) {
-          localStorage.setItem(roomSideKey(joinedRoom.id), "black");
-          router.push(`/friend?room=${joinedRoom.id}`);
-          return;
-        }
-      }
-
-      const createdRoom = await createQuickMatchRoom({
-        timeControl: timeControl.id,
-        playerKey,
-        rating: playerRating,
+        }),
       });
 
-      if (!createdRoom) {
-        setQuickMessage("Could not create matchmaking room.");
+      const payload = (await response.json()) as {
+        room?: { id: string };
+        side?: "white" | "black";
+        error?: string;
+      };
+
+      if (!response.ok || !payload.room || !payload.side) {
+        setQuickMessage(payload.error ?? "Could not start online matchmaking.");
         setIsQuickMatching(false);
         return;
       }
 
-      localStorage.setItem(roomSideKey(createdRoom.id), "white");
-      router.push(`/friend?room=${createdRoom.id}`);
+      localStorage.setItem(roomSideKey(payload.room.id), payload.side);
+      router.push(`/friend?room=${payload.room.id}`);
     } catch {
-      setQuickMessage("Matchmaking failed. Check Supabase room policies.");
+      setQuickMessage("Matchmaking failed. Check Supabase env vars and server logs.");
       setIsQuickMatching(false);
     }
   }

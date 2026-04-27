@@ -42,6 +42,12 @@ type PuzzleView =
   | "mistakes";
 type DifficultyMode = "adaptive" | "easy" | "medium" | "hard" | "custom";
 type Feedback = "idle" | "correct" | "incorrect" | "solved" | "failed";
+type PromotionPiece = "q" | "r" | "b" | "n";
+type PendingPromotion = {
+  from: string;
+  to: string;
+  side: "white" | "black";
+};
 
 const STARTING_PUZZLE_RATING = 1500;
 const SPECIAL_META_KEY = "__meta__";
@@ -51,6 +57,7 @@ const SPECIAL_SURVIVAL_KEY = "__survival__";
 const SPECIAL_BATTLE_KEY = "__battle__";
 const SPECIAL_DAILY_KEY = "__daily__";
 const MAX_STRIKES = 3;
+const MIN_TRAINING_PUZZLE_RATING = 1200;
 const BLOCKED_PUZZLE_IDS = new Set([
   "rated-clearance-1520",
   "rated-knight-fork-1850",
@@ -100,6 +107,7 @@ function normalizeProgress(progress?: Partial<PuzzleProgress>): PuzzleProgress {
 
 function isPlayablePuzzle(puzzle: Puzzle) {
   try {
+    if (puzzle.rating < MIN_TRAINING_PUZZLE_RATING) return false;
     if (BLOCKED_PUZZLE_IDS.has(puzzle.id)) return false;
     const chess = new Chess(puzzle.fen);
     const expectedSide = puzzle.sideToMove === "white" ? "w" : "b";
@@ -183,10 +191,10 @@ function ratingDelta(playerRating: number, puzzleRating: number, correct: boolea
 }
 
 function rangeForDifficulty(mode: DifficultyMode, customMin: number, customMax: number) {
-  if (mode === "easy") return [400, 1200];
-  if (mode === "medium") return [1200, 1800];
+  if (mode === "easy") return [MIN_TRAINING_PUZZLE_RATING, 1500];
+  if (mode === "medium") return [1500, 1900];
   if (mode === "hard") return [1800, 2800];
-  if (mode === "custom") return [customMin, customMax];
+  if (mode === "custom") return [Math.max(MIN_TRAINING_PUZZLE_RATING, customMin), customMax];
   return null;
 }
 
@@ -237,6 +245,7 @@ export default function PuzzlesPage() {
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [answerSquares, setAnswerSquares] = useState<string[]>([]);
   const [wrongSquares, setWrongSquares] = useState<string[]>([]);
+  const [pendingPromotion, setPendingPromotion] = useState<PendingPromotion | null>(null);
   const [linePly, setLinePly] = useState(0);
   const [hintLevel, setHintLevel] = useState(0);
   const [usedSolution, setUsedSolution] = useState(false);
@@ -427,6 +436,7 @@ export default function PuzzlesPage() {
     setSelectedSquare(null);
     setAnswerSquares([]);
     setWrongSquares([]);
+    setPendingPromotion(null);
     setLinePly(0);
     setHintLevel(0);
     setUsedSolution(false);
@@ -647,7 +657,17 @@ export default function PuzzlesPage() {
     }
   }
 
-  function tryMove(sourceSquare: string, targetSquare: string | null) {
+  function needsPromotion(sourceSquare: string, targetSquare: string) {
+    const chess = new Chess(position);
+    const piece = chess.get(sourceSquare as Square);
+    if (!piece || piece.type !== "p") return false;
+    return (
+      (piece.color === "w" && targetSquare.endsWith("8")) ||
+      (piece.color === "b" && targetSquare.endsWith("1"))
+    );
+  }
+
+  function tryMove(sourceSquare: string, targetSquare: string | null, promotion: PromotionPiece = "q") {
     if (!targetSquare || boardDisabled) return false;
     const chess = new Chess(position);
 
@@ -655,7 +675,7 @@ export default function PuzzlesPage() {
       const move = chess.move({
         from: sourceSquare,
         to: targetSquare,
-        promotion: "q",
+        promotion,
       });
       const current = normalizeProgress(solved[currentPuzzle.id]);
       const correct = isExpectedMove(move, currentPuzzle, linePly);
@@ -663,6 +683,7 @@ export default function PuzzlesPage() {
       if (!correct) {
         recordWrongMove(move.from, move.to, current);
         setSelectedSquare(null);
+        setPendingPromotion(null);
         return false;
       }
 
@@ -670,6 +691,7 @@ export default function PuzzlesPage() {
       setWrongSquares([]);
       setAnswerSquares([move.from, move.to]);
       setSelectedSquare(null);
+      setPendingPromotion(null);
       setFeedback("correct");
 
       const nextLinePly = linePly + 1;
@@ -701,11 +723,19 @@ export default function PuzzlesPage() {
   }
 
   function onSquareClick({ square }: { square: string }) {
-    if (boardDisabled) return;
+    if (boardDisabled || pendingPromotion) return;
     const chess = new Chess(position);
     const piece = chess.get(square as Square);
 
     if (selectedSquare && selectedTargets.includes(square as Square)) {
+      if (needsPromotion(selectedSquare, square)) {
+        setPendingPromotion({
+          from: selectedSquare,
+          to: square,
+          side: chess.turn() === "w" ? "white" : "black",
+        });
+        return;
+      }
       tryMove(selectedSquare, square);
       return;
     }
@@ -847,8 +877,8 @@ export default function PuzzlesPage() {
             </SelectField>
             <SelectField label="Difficulty" value={difficultyMode} onChange={(event) => setDifficultyMode(event.target.value as DifficultyMode)}>
               <option value="adaptive">Adaptive</option>
-              <option value="easy">Easy 400-1200</option>
-              <option value="medium">Medium 1200-1800</option>
+              <option value="easy">Easy 1200-1500</option>
+              <option value="medium">Medium 1500-1900</option>
               <option value="hard">Hard 1800+</option>
               <option value="custom">Custom range</option>
             </SelectField>
@@ -1002,15 +1032,27 @@ export default function PuzzlesPage() {
           </div>
           <Button variant="secondary" onClick={() => setView("home")}>Modes</Button>
         </div>
-        <div className="mx-auto max-w-[min(82vh,720px)]">
+        <div className="relative mx-auto max-w-[min(82vh,720px)]">
           <Chessboard
             options={{
               position,
               boardOrientation: currentPuzzle.sideToMove,
-              onPieceDrop: ({ sourceSquare, targetSquare }) => tryMove(sourceSquare, targetSquare),
+              onPieceDrop: ({ sourceSquare, targetSquare }) => {
+                if (pendingPromotion) return false;
+                if (!targetSquare) return false;
+                if (needsPromotion(sourceSquare, targetSquare)) {
+                  setPendingPromotion({
+                    from: sourceSquare,
+                    to: targetSquare,
+                    side: new Chess(position).turn() === "w" ? "white" : "black",
+                  });
+                  return false;
+                }
+                return tryMove(sourceSquare, targetSquare);
+              },
               onSquareClick,
               squareStyles,
-              allowDragging: !boardDisabled,
+              allowDragging: !boardDisabled && !pendingPromotion,
               boardStyle: {
                 borderRadius: "1.5rem",
                 boxShadow: "0 24px 80px rgba(0,0,0,0.22)",
@@ -1020,6 +1062,40 @@ export default function PuzzlesPage() {
               darkSquareStyle: { backgroundColor: "#58764a" },
             }}
           />
+          {pendingPromotion ? (
+            <div className="absolute inset-0 z-20 grid place-items-end bg-black/35 p-3 backdrop-blur-[2px] sm:place-items-center sm:p-4">
+              <div className="w-full max-w-md rounded-2xl border bg-card/96 p-4 text-card-foreground shadow-2xl sm:p-5">
+                <h2 className="text-2xl font-black">Choose promotion</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Pawn reached {pendingPromotion.to}. Choose the piece for this puzzle move.
+                </p>
+                <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  {[
+                    ["q", "Queen"],
+                    ["r", "Rook"],
+                    ["b", "Bishop"],
+                    ["n", "Knight"],
+                  ].map(([piece, label]) => (
+                    <Button
+                      key={piece}
+                      variant="secondary"
+                      className="h-20 flex-col rounded-2xl px-2"
+                      onClick={() =>
+                        tryMove(
+                          pendingPromotion.from,
+                          pendingPromotion.to,
+                          piece as PromotionPiece,
+                        )
+                      }
+                    >
+                      <span className="font-mono text-3xl font-black uppercase">{piece}</span>
+                      <span className="mt-1 text-xs">{label}</span>
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
       </Card>
 

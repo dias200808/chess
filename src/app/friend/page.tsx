@@ -21,6 +21,12 @@ import {
 } from "@/lib/supabase-data";
 
 type OnlineSide = "white" | "black" | "spectator";
+type PromotionPiece = "q" | "r" | "b" | "n";
+type PendingPromotion = {
+  from: string;
+  to: string;
+  side: "white" | "black";
+};
 
 function replay(moves: string[]) {
   const chess = new Chess();
@@ -66,6 +72,7 @@ function FriendClient() {
   const [message, setMessage] = useState("");
   const [timeControlId, setTimeControlId] = useState("10-0");
   const [playerSide, setPlayerSide] = useState<OnlineSide | null>(null);
+  const [pendingPromotion, setPendingPromotion] = useState<PendingPromotion | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [isLoadingRoom, setIsLoadingRoom] = useState(false);
   const [nowMs, setNowMs] = useState(0);
@@ -280,7 +287,16 @@ function FriendClient() {
     return playerSide === "white" ? piece.color === "w" : piece.color === "b";
   }
 
-  async function makeMove(sourceSquare: string, targetSquare: string | null) {
+  function needsPromotion(sourceSquare: string, targetSquare: string) {
+    const piece = chess.get(sourceSquare as Square);
+    if (!piece || piece.type !== "p") return false;
+    return (
+      (piece.color === "w" && targetSquare.endsWith("8")) ||
+      (piece.color === "b" && targetSquare.endsWith("1"))
+    );
+  }
+
+  async function makeMove(sourceSquare: string, targetSquare: string | null, promotion: PromotionPiece = "q") {
     if (!targetSquare || !room || !canMovePiece(sourceSquare)) return false;
     if (!squareTargets(chess.fen(), sourceSquare).includes(targetSquare as Square)) return false;
 
@@ -292,7 +308,7 @@ function FriendClient() {
           playerKey: getOnlinePlayerKey(user?.id),
           from: sourceSquare,
           to: targetSquare,
-          promotion: "q",
+          promotion,
         }),
       });
       const payload = (await response.json()) as { room?: Room; error?: string };
@@ -304,6 +320,7 @@ function FriendClient() {
       setMoves(payload.room.moves ?? []);
       setSelectedSquare(null);
       setHoverSquare(null);
+      setPendingPromotion(null);
       return true;
     } catch {
       setMessage("Could not send move to server.");
@@ -312,7 +329,16 @@ function FriendClient() {
   }
 
   function onSquareClick({ square }: { square: string }) {
+    if (pendingPromotion) return;
     if (selectedSquare && selectedTargets.includes(square as Square)) {
+      if (needsPromotion(selectedSquare, square)) {
+        setPendingPromotion({
+          from: selectedSquare,
+          to: square,
+          side: chess.turn() === "w" ? "white" : "black",
+        });
+        return;
+      }
       void makeMove(selectedSquare, square);
       return;
     }
@@ -438,15 +464,24 @@ function FriendClient() {
                 Opponent disconnected. Waiting for reconnect...
               </p>
             ) : null}
-            <div className="mx-auto max-w-[min(82vh,720px)]">
+            <div className="relative mx-auto max-w-[min(82vh,720px)]">
               <Chessboard
                 options={{
                   position: chess.fen(),
                   boardOrientation: playerSide === "black" ? "black" : "white",
                   onPieceDrop: ({ sourceSquare, targetSquare }) => {
+                    if (pendingPromotion) return false;
                     if (!targetSquare) return false;
                     if (!canMovePiece(sourceSquare)) return false;
                     if (!squareTargets(chess.fen(), sourceSquare).includes(targetSquare as Square)) return false;
+                    if (needsPromotion(sourceSquare, targetSquare)) {
+                      setPendingPromotion({
+                        from: sourceSquare,
+                        to: targetSquare,
+                        side: chess.turn() === "w" ? "white" : "black",
+                      });
+                      return false;
+                    }
                     void makeMove(sourceSquare, targetSquare);
                     return true;
                   },
@@ -463,6 +498,40 @@ function FriendClient() {
                   darkSquareStyle: { backgroundColor: "#58764a" },
                 }}
               />
+              {pendingPromotion ? (
+                <div className="absolute inset-0 z-20 grid place-items-end bg-black/35 p-3 backdrop-blur-[2px] sm:place-items-center sm:p-4">
+                  <div className="w-full max-w-md rounded-2xl border bg-card/96 p-4 text-card-foreground shadow-2xl sm:p-5">
+                    <h2 className="text-2xl font-black">Choose promotion</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Pawn reached {pendingPromotion.to}. Pick the piece before the move is sent.
+                    </p>
+                    <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      {[
+                        ["q", "Queen"],
+                        ["r", "Rook"],
+                        ["b", "Bishop"],
+                        ["n", "Knight"],
+                      ].map(([piece, label]) => (
+                        <Button
+                          key={piece}
+                          variant="secondary"
+                          className="h-20 flex-col rounded-2xl px-2"
+                          onClick={() =>
+                            void makeMove(
+                              pendingPromotion.from,
+                              pendingPromotion.to,
+                              piece as PromotionPiece,
+                            )
+                          }
+                        >
+                          <span className="font-mono text-3xl font-black uppercase">{piece}</span>
+                          <span className="mt-1 text-xs">{label}</span>
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </Card>
 

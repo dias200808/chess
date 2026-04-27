@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Chess, type Square } from "chess.js";
 import {
@@ -455,7 +455,6 @@ export function ChessGame({
     if (isViewingHistory) return false;
 
     if (needsPromotion(sourceSquare, targetSquare)) {
-      if (settings.autoQueen) return commitMove({ sourceSquare, targetSquare, promotion: "q" });
       setPendingPromotion({
         from: sourceSquare,
         to: targetSquare,
@@ -716,12 +715,40 @@ export function ChessGame({
     return "bg-muted";
   }
 
-  function jumpToPly(nextPly: number) {
+  const jumpToPly = useCallback((nextPly: number) => {
     const clamped = Math.max(0, Math.min(moves.length, nextPly));
     setViewedPly(clamped === moves.length ? null : clamped);
     setSelectedSquare(null);
     setHoverSquare(null);
-  }
+  }, [moves.length]);
+
+  useEffect(() => {
+    function handleMoveHistoryKeys(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName;
+      const isTyping =
+        target?.isContentEditable || tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT";
+
+      if (isTyping || !moves.length) return;
+
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        jumpToPly(effectiveViewedPly - 1);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        jumpToPly(effectiveViewedPly + 1);
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        jumpToPly(0);
+      } else if (event.key === "End") {
+        event.preventDefault();
+        jumpToPly(moves.length);
+      }
+    }
+
+    window.addEventListener("keydown", handleMoveHistoryKeys);
+    return () => window.removeEventListener("keydown", handleMoveHistoryKeys);
+  }, [effectiveViewedPly, jumpToPly, moves.length]);
 
   const reviewCounts = summarizeMoveTypes(activeAnalysis.evaluations);
   const isReviewPending = isGameOver && moves.length >= 2 && Boolean(analysisProgress) && !postGameAnalysis;
@@ -875,7 +902,7 @@ export function ChessGame({
                   {isReviewPending ? (
                     <div className="mt-4 rounded-xl bg-muted p-4">
                       <div className="flex items-center justify-between gap-3 text-sm font-semibold">
-                        <span>Stockfish разбирает партию</span>
+                        <span>Можно посмотреть анализ ходов</span>
                         <span>
                           {analysisProgress?.done}/{analysisProgress?.total}
                         </span>
@@ -889,7 +916,7 @@ export function ChessGame({
                         />
                       </div>
                       <p className="mt-3 text-xs text-muted-foreground">
-                        Подожди пару секунд: так разбор не сохранит сырой список, где все ходы выглядят хорошими.
+                        Проверка Stockfish продолжается в фоне. Нажмите кнопку ниже, чтобы открыть страницу анализа ходов.
                       </p>
                     </div>
                   ) : hasDeepAnalysis ? (
@@ -910,7 +937,7 @@ export function ChessGame({
                     <div className="mt-4 rounded-xl bg-muted p-4">
                       <p className="text-sm font-semibold">Партия ещё не проверена Stockfish.</p>
                       <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                        Нажмите «Разбор», чтобы открыть проверку. До анализа я не буду показывать проценты точности
+                        Нажмите «Посмотреть анализ ходов», чтобы открыть проверку. До анализа я не буду показывать проценты точности
                         и оценки ходов, чтобы не вводить в заблуждение.
                       </p>
                     </div>
@@ -923,7 +950,7 @@ export function ChessGame({
                     </Button>
                     <Button onClick={openReview} disabled={!canOpenReview || isOpeningReview}>
                       <Search className="mr-2 h-4 w-4" />
-                      {isReviewPending ? "Идёт анализ..." : isOpeningReview ? "Открываю..." : "Разбор"}
+                      {isOpeningReview ? "Открываю..." : "Посмотреть анализ ходов"}
                     </Button>
                   </div>
                 </div>
@@ -1067,7 +1094,7 @@ export function ChessGame({
                 disabled={!canOpenReview || isOpeningReview}
               >
                 <Search className="mr-2 h-4 w-4" />
-                {isReviewPending ? "Analyzing..." : isOpeningReview ? "Opening..." : "Analyze"}
+                {isOpeningReview ? "Открываю..." : "Посмотреть анализ"}
               </Button>
             ) : null}
             <Button variant="secondary" onClick={copyPgn}>
@@ -1155,7 +1182,7 @@ export function ChessGame({
             </>
           ) : (
             <div className="mt-4 rounded-2xl bg-muted p-4 text-sm leading-6 text-muted-foreground">
-              Разбор ещё не готов. Нажмите Analyze/Разбор, чтобы открыть страницу проверки; оценки ходов появятся
+              Разбор ещё не готов. Нажмите «Посмотреть анализ ходов», чтобы открыть страницу проверки; оценки ходов появятся
               только после Stockfish.
             </div>
           )}
