@@ -11,7 +11,9 @@ import {
   History,
   Menu,
   Moon,
+  PencilRuler,
   Search,
+  Settings,
   Sun,
   Swords,
   Trophy,
@@ -21,6 +23,8 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { backgroundClass } from "@/lib/board-visuals";
+import { getSettings } from "@/lib/storage";
 import { useAuth } from "@/components/auth-provider";
 import { useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui";
@@ -39,6 +43,8 @@ const navSections = [
     title: "Разбор",
     items: [
       { href: "/history", label: "История", icon: History },
+      { href: "/analysis-board", label: "Analysis Board", icon: Search },
+      { href: "/board-editor", label: "Board Editor", icon: PencilRuler },
       { href: "/leaderboard", label: "Рейтинг", icon: Trophy },
       { href: "/learn", label: "Обучение", icon: GraduationCap },
       { href: "/pricing", label: "Pro", icon: Crown },
@@ -51,6 +57,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const { mounted, resolvedTheme, setTheme } = useTheme();
   const [open, setOpen] = useState(false);
+  const shellSettings = getSettings();
 
   const nav = (
     <nav className="grid gap-5">
@@ -82,8 +89,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <div className="min-h-screen bg-[#24221f] text-[#f4efe4] lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
-      <aside className="hidden border-r border-white/6 bg-[#1f1d1b] lg:flex lg:min-h-screen lg:flex-col lg:px-4 lg:py-5">
+    <div
+      className={cn(
+        "min-h-screen text-[#f4efe4] lg:grid",
+        shellSettings.zenMode ? "lg:grid-cols-[minmax(0,1fr)]" : "lg:grid-cols-[15rem_minmax(0,1fr)]",
+        backgroundClass(shellSettings.backgroundTheme),
+      )}
+    >
+      <aside className={cn("hidden border-r border-white/6 bg-[#1f1d1b] lg:flex lg:min-h-screen lg:flex-col lg:px-4 lg:py-5", shellSettings.zenMode && "lg:hidden")}>
         <Link href="/" className="flex items-center gap-3 rounded-2xl px-3 py-2">
           <span className="grid h-11 w-11 place-items-center rounded-2xl bg-[#5e8a3c] text-white shadow-lg shadow-[#5e8a3c]/25">
             <Crown className="h-5 w-5" />
@@ -117,6 +130,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             )}
             <span>Тема</span>
           </button>
+          <Link
+            href="/settings"
+            className="flex h-11 items-center gap-3 rounded-2xl px-3 text-sm font-semibold text-[#d7d1c6] transition hover:bg-white/6 hover:text-white"
+          >
+            <Settings className="h-4 w-4" />
+            <span>Settings</span>
+          </Link>
           <Link
             href={user ? "/profile" : "/login"}
             className="flex h-12 items-center gap-3 rounded-2xl bg-[#5e8a3c] px-4 text-sm font-bold text-white transition hover:brightness-105"
@@ -161,6 +181,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   )}
                   <span>Тема</span>
                 </button>
+                <Link
+                  href="/settings"
+                  onClick={() => setOpen(false)}
+                  className="inline-flex h-11 items-center justify-center rounded-2xl bg-white/6 px-5 text-sm font-semibold text-white"
+                >
+                  Settings
+                </Link>
                 <Link
                   href={user ? "/profile" : "/login"}
                   onClick={() => setOpen(false)}

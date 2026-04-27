@@ -7,6 +7,8 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
+    "validate:rules": "node scripts/validate-chess-rules.mjs",
+    "validate:time": "node scripts/validate-time-controls.mjs",
     "validate:puzzles": "node scripts/validate-puzzles.mjs"
   },
   "dependencies": {

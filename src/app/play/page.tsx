@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Bot, ChevronLeft, History, Swords, Trophy, Users } from "lucide-react";
 import { BoardStagePreview } from "@/components/board-stage-preview";
@@ -36,9 +37,11 @@ function StartTile({
   );
 }
 
-export default function PlayPage() {
+function PlayPageInner() {
+  const params = useSearchParams();
+  const initialFen = params.get("fen") ?? undefined;
   const [started, setStarted] = useState(false);
-  const [timeControlId, setTimeControlId] = useState("rapid");
+  const [timeControlId, setTimeControlId] = useState("10-0");
   const timeControl = getTimeControlPreset(timeControlId);
 
   if (started) {
@@ -52,7 +55,12 @@ export default function PlayPage() {
           <ChevronLeft className="mr-2 h-4 w-4" />
           К выбору режима
         </Button>
-        <ChessGame key={`local-${timeControl.id}`} mode="local" timeControl={timeControl} />
+        <ChessGame
+          key={`local-${timeControl.id}-${initialFen ?? "start"}`}
+          mode="local"
+          timeControl={timeControl}
+          initialFen={initialFen}
+        />
       </div>
     );
   }
@@ -75,6 +83,11 @@ export default function PlayPage() {
             или по ссылке с другом.
           </p>
           <div className="mt-4 max-w-xs">
+            {initialFen ? (
+              <p className="mb-3 rounded-2xl bg-[#34312d] p-3 text-sm font-semibold text-[#f4efe4]">
+                Custom start position loaded from FEN.
+              </p>
+            ) : null}
             <SelectField
               label="Контроль времени"
               value={timeControlId}
@@ -123,5 +136,13 @@ export default function PlayPage() {
         </div>
       </section>
     </div>
+  );
+}
+
+export default function PlayPage() {
+  return (
+    <Suspense fallback={<div className="rounded-[1.75rem] border border-white/6 bg-[#262421] p-6 text-white">Loading play page...</div>}>
+      <PlayPageInner />
+    </Suspense>
   );
 }

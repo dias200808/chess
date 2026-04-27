@@ -120,8 +120,21 @@ export function getGameResult(chess: Chess): {
     return { result: "1/2-1/2", winner: "draw", label: "Ничья патом." };
   }
 
+  if (chess.isInsufficientMaterial()) {
+    return { result: "1/2-1/2", winner: "draw", label: "Ничья: недостаточно материала." };
+  }
+
+  if (chess.isThreefoldRepetition()) {
+    return { result: "1/2-1/2", winner: "draw", label: "Ничья: повторение позиции." };
+  }
+
   if (chess.isDraw()) {
-    return { result: "1/2-1/2", winner: "draw", label: "Ничья." };
+    const halfmoveClock = Number(chess.fen().split(" ")[4] ?? 0);
+    return {
+      result: "1/2-1/2",
+      winner: "draw",
+      label: halfmoveClock >= 100 ? "Ничья: правило 50 ходов." : "Ничья.",
+    };
   }
 
   return {

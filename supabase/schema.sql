@@ -3,8 +3,14 @@ create table if not exists public.profiles (
   email text not null,
   username text not null,
   city text default 'Unknown',
+  country text default 'Unknown',
   avatar text,
   rating integer not null default 1200,
+  bullet_rating integer not null default 1200,
+  blitz_rating integer not null default 1200,
+  rapid_rating integer not null default 1200,
+  classical_rating integer not null default 1200,
+  puzzle_rating integer not null default 1200,
   games_count integer not null default 0,
   wins integer not null default 0,
   losses integer not null default 0,
@@ -16,13 +22,22 @@ create table if not exists public.games (
   id uuid primary key default gen_random_uuid(),
   white_user_id uuid references public.profiles(id),
   black_user_id uuid references public.profiles(id),
+  white_player text not null default 'White',
+  black_player text not null default 'Black',
   mode text not null check (mode in ('local', 'bot', 'friend')),
   result text not null default '*',
   winner text,
+  end_reason text default 'Unknown',
   opponent text default 'Opponent',
   moves jsonb not null default '[]'::jsonb,
   pgn text not null default '',
   final_position text not null,
+  time_control text,
+  rated boolean not null default false,
+  rating_type text,
+  rating_before integer,
+  rating_after integer,
+  rating_change integer,
   white_accuracy integer,
   black_accuracy integer,
   analysis jsonb,
@@ -67,6 +82,21 @@ create table if not exists public.subscriptions (
 );
 
 alter table public.games add column if not exists opponent text default 'Opponent';
+alter table public.games add column if not exists white_player text not null default 'White';
+alter table public.games add column if not exists black_player text not null default 'Black';
+alter table public.games add column if not exists end_reason text default 'Unknown';
+alter table public.games add column if not exists time_control text;
+alter table public.games add column if not exists rated boolean not null default false;
+alter table public.games add column if not exists rating_type text;
+alter table public.games add column if not exists rating_before integer;
+alter table public.games add column if not exists rating_after integer;
+alter table public.games add column if not exists rating_change integer;
+alter table public.profiles add column if not exists country text default 'Unknown';
+alter table public.profiles add column if not exists bullet_rating integer not null default 1200;
+alter table public.profiles add column if not exists blitz_rating integer not null default 1200;
+alter table public.profiles add column if not exists rapid_rating integer not null default 1200;
+alter table public.profiles add column if not exists classical_rating integer not null default 1200;
+alter table public.profiles add column if not exists puzzle_rating integer not null default 1200;
 alter table public.puzzle_progress add column if not exists score integer not null default 0;
 alter table public.puzzle_progress add column if not exists best_rush_score integer not null default 0;
 alter table public.puzzle_progress add column if not exists current_streak integer not null default 0;
@@ -134,12 +164,18 @@ security definer
 set search_path = public
 as $$
 begin
-  insert into public.profiles (id, email, username, avatar)
+  insert into public.profiles (id, email, username, avatar, rating, bullet_rating, blitz_rating, rapid_rating, classical_rating, puzzle_rating)
   values (
     new.id,
     new.email,
     coalesce(new.raw_user_meta_data ->> 'username', split_part(new.email, '@', 1)),
-    upper(left(coalesce(new.raw_user_meta_data ->> 'username', split_part(new.email, '@', 1)), 2))
+    upper(left(coalesce(new.raw_user_meta_data ->> 'username', split_part(new.email, '@', 1)), 2)),
+    1200,
+    1200,
+    1200,
+    1200,
+    1200,
+    1200
   );
   return new;
 end;

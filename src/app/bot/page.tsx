@@ -13,7 +13,7 @@ export default function BotPage() {
   const [colorChoice, setColorChoice] = useState<"white" | "black" | "random">("white");
   const [playerColor, setPlayerColor] = useState<"white" | "black">("white");
   const [difficulty, setDifficulty] = useState<BotDifficulty>("elo-800");
-  const [timeControlId, setTimeControlId] = useState("rapid");
+  const [timeControlId, setTimeControlId] = useState("10-0");
   const [started, setStarted] = useState(false);
   const profile = getBotProfile(difficulty);
   const timeControl = getTimeControlPreset(timeControlId);

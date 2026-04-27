@@ -1,4 +1,4 @@
-import type { PuzzleProgress, SavedGame, UserProfile } from "@/lib/types";
+import type { ChessSettings, PuzzleProgress, SavedGame, UserProfile } from "@/lib/types";
 
 const PROFILE_KEY = "knightly.profiles";
 const SESSION_KEY = "knightly.session";
@@ -93,21 +93,28 @@ export function setPuzzleState(
   writeJson(PUZZLES_KEY, state);
 }
 
-export function getSettings() {
-  return readJson(
-    SETTINGS_KEY,
-    {
-      boardStyle: "forest",
-      pieceStyle: "classic",
-      sounds: true,
-    },
-  );
+export const defaultSettings: ChessSettings = {
+  boardStyle: "forest",
+  pieceStyle: "classic",
+  backgroundTheme: "arena",
+  sounds: true,
+  boardCoordinates: true,
+  legalMoves: true,
+  lastMoveHighlight: true,
+  autoQueen: false,
+  premoves: false,
+  moveConfirmation: false,
+  animationSpeed: 180,
+  zenMode: false,
+};
+
+export function getSettings(): ChessSettings {
+  return {
+    ...defaultSettings,
+    ...readJson<Partial<ChessSettings>>(SETTINGS_KEY, {}),
+  };
 }
 
-export function setSettings(settings: {
-  boardStyle: string;
-  pieceStyle: string;
-  sounds: boolean;
-}) {
+export function setSettings(settings: ChessSettings) {
   writeJson(SETTINGS_KEY, settings);
 }

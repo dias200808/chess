@@ -8,9 +8,10 @@ import { BoardStagePreview } from "@/components/board-stage-preview";
 import { Chessboard } from "@/components/client-chessboard";
 import { ChessGame } from "@/components/chess-game";
 import { useAuth } from "@/components/auth-provider";
-import { Badge, Button, Card } from "@/components/ui";
+import { Badge, Button, Card, SelectField } from "@/components/ui";
 import type { Room } from "@/lib/types";
 import { getGameResult, squareTargets } from "@/lib/chess-utils";
+import { getTimeControlPreset, timeControlPresets } from "@/lib/game-config";
 import {
   createRoomInSupabase,
   fetchRoomFromSupabase,
@@ -39,8 +40,10 @@ function FriendClient() {
   const [moves, setMoves] = useState<string[]>([]);
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const [timeControlId, setTimeControlId] = useState("10-0");
   const roomId = params.get("room");
   const canUseRealtime = authMode === "supabase" && isSupabaseConfigured() && user;
+  const timeControl = getTimeControlPreset(timeControlId);
 
   const chess = useMemo(() => replay(moves), [moves]);
   const result = getGameResult(chess);
@@ -150,7 +153,7 @@ function FriendClient() {
             topLabel="Друг"
             topMeta="Подключится по ссылке"
             bottomLabel="Вы"
-            bottomMeta={canUseRealtime ? "Онлайн-комната" : "Локальный режим"}
+            bottomMeta={`${canUseRealtime ? "Онлайн-комната" : "Локальный режим"} • ${timeControl.label}`}
           />
 
           <section className="grid gap-4 rounded-[1.75rem] border border-white/6 bg-[#262421] p-4 text-[#f4efe4] shadow-2xl shadow-black/20">
@@ -177,6 +180,18 @@ function FriendClient() {
                     партии после подключения второго игрока.
                   </p>
                   <div className="mt-4 flex flex-wrap gap-3">
+                    <SelectField
+                      label="Контроль времени"
+                      value={timeControlId}
+                      className="min-w-40 border-white/10 bg-[#262421] text-white"
+                      onChange={(event) => setTimeControlId(event.target.value)}
+                    >
+                      {timeControlPresets.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </SelectField>
                     <Button onClick={createRoom}>
                       <LinkIcon className="mr-2 h-4 w-4" />
                       Создать комнату
@@ -262,7 +277,7 @@ function FriendClient() {
           </Card>
         </div>
       ) : (
-        <ChessGame mode="friend" />
+        <ChessGame mode="friend" timeControl={timeControl} />
       )}
     </div>
   );

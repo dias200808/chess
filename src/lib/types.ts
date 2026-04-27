@@ -22,13 +22,36 @@ export type TimeControl = {
   incrementSeconds: number;
 };
 
+export type ChessSettings = {
+  boardStyle: "forest" | "sand" | "classic" | "blue" | "mono";
+  pieceStyle: "classic" | "modern" | "alpha";
+  backgroundTheme: "arena" | "plain" | "wood" | "midnight";
+  sounds: boolean;
+  boardCoordinates: boolean;
+  legalMoves: boolean;
+  lastMoveHighlight: boolean;
+  autoQueen: boolean;
+  premoves: boolean;
+  moveConfirmation: boolean;
+  animationSpeed: number;
+  zenMode: boolean;
+};
+
+export type RatingType = "bullet" | "blitz" | "rapid" | "classical" | "puzzle";
+
 export type UserProfile = {
   id: string;
   email: string;
   username: string;
   city: string;
+  country: string;
   avatar: string;
   rating: number;
+  bulletRating: number;
+  blitzRating: number;
+  rapidRating: number;
+  classicalRating: number;
+  puzzleRating: number;
   gamesCount: number;
   wins: number;
   losses: number;
@@ -40,14 +63,22 @@ export type SavedGame = {
   id: string;
   whiteUserId?: string;
   blackUserId?: string;
+  whitePlayer: string;
+  blackPlayer: string;
   mode: GameMode;
   result: GameResult;
   winner: "white" | "black" | "draw" | null;
+  endReason: string;
   opponent: string;
   moves: string[];
   pgn: string;
   finalPosition: string;
   timeControl?: string;
+  rated?: boolean;
+  ratingType?: RatingType;
+  ratingBefore?: number;
+  ratingAfter?: number;
+  ratingChange?: number;
   whiteAccuracy: number;
   blackAccuracy: number;
   analysis: GameAnalysis;
@@ -101,7 +132,13 @@ export type Puzzle = {
     | "mate in 2"
     | "fork"
     | "pin"
+    | "skewer"
+    | "discovered attack"
+    | "double attack"
+    | "hanging piece"
     | "sacrifice"
+    | "defense"
+    | "promotion"
     | "deflection"
     | "clearance"
     | "winning material"
@@ -112,8 +149,33 @@ export type Puzzle = {
   line?: string[];
   sideToMove: "white" | "black";
   explanation: string;
+  hint?: string;
   rating: number;
   points: number;
+};
+
+export type Lesson = {
+  id: string;
+  category:
+    | "how pieces move"
+    | "check"
+    | "checkmate"
+    | "castling"
+    | "opening principles"
+    | "basic tactics"
+    | "forks"
+    | "pins"
+    | "endgames"
+    | "king safety"
+    | "common mistakes";
+  title: string;
+  fen: string;
+  sideToMove: "white" | "black";
+  explanation: string;
+  task: string;
+  answer: string;
+  hint: string;
+  success: string;
 };
 
 export type PuzzleProgress = {

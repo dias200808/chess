@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Chess } from "chess.js";
-import { ChevronLeft, ChevronRight, Cpu } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Cpu, Shuffle } from "lucide-react";
 import type { GameAnalysis, MoveEvaluation, SavedGame } from "@/lib/types";
 import { analyzeMoves, moveTypeLabel, summarizeMoveTypes } from "@/lib/chess-utils";
 import { runStockfishGameAnalysis } from "@/lib/stockfish-client";
@@ -36,6 +36,9 @@ function fallbackGame(): SavedGame {
     result: "*",
     winner: null,
     opponent: "Sample bot",
+    whitePlayer: "White",
+    blackPlayer: "Sample bot",
+    endReason: "Sample game",
     moves,
     pgn: chess.pgn(),
     finalPosition: chess.fen(),
@@ -92,6 +95,92 @@ function moveClassName(type: MoveEvaluation["type"]) {
   }
 }
 
+function moveBadgeClassName(type: MoveEvaluation["type"]) {
+  switch (type) {
+    case "best move":
+    case "brilliant":
+    case "checkmate":
+      return "bg-emerald-500 text-white";
+    case "excellent":
+      return "bg-sky-500 text-white";
+    case "good move":
+      return "bg-zinc-700 text-white";
+    case "inaccuracy":
+      return "bg-yellow-400 text-black";
+    case "mistake":
+      return "bg-orange-500 text-white";
+    case "blunder":
+      return "bg-red-600 text-white";
+    case "missed win":
+      return "bg-purple-600 text-white";
+    default:
+      return "bg-zinc-700 text-white";
+  }
+}
+
+function moveBadgeText(type: MoveEvaluation["type"]) {
+  switch (type) {
+    case "best move":
+      return "!";
+    case "brilliant":
+      return "!!";
+    case "excellent":
+      return "✓";
+    case "good move":
+      return "•";
+    case "inaccuracy":
+      return "?!";
+    case "mistake":
+      return "?";
+    case "blunder":
+      return "??";
+    case "missed win":
+      return "!";
+    case "checkmate":
+      return "#";
+    default:
+      return "";
+  }
+}
+
+function squareGridPosition(square?: string, orientation: "white" | "black" = "white") {
+  if (!square || square.length < 2) return null;
+  const file = square.charCodeAt(0) - 97;
+  const rank = Number(square[1]);
+  if (file < 0 || file > 7 || rank < 1 || rank > 8) return null;
+  if (orientation === "black") return { column: 8 - file, row: rank };
+  return { column: file + 1, row: 9 - rank };
+}
+
+function BoardMoveBadge({
+  move,
+  orientation,
+}: {
+  move?: MoveEvaluation;
+  orientation: "white" | "black";
+}) {
+  const target = squareGridPosition(move?.uci?.slice(2, 4), orientation);
+  if (!move || !target) return null;
+
+  return (
+    <div className="pointer-events-none absolute inset-0 grid grid-cols-8 grid-rows-8">
+      <div
+        className="flex items-end justify-end p-[7%]"
+        style={{ gridColumn: target.column, gridRow: target.row }}
+      >
+        <span
+          className={cn(
+            "grid h-9 min-w-9 place-items-center rounded-full border-2 border-white px-2 text-sm font-black shadow-xl",
+            moveBadgeClassName(move.type),
+          )}
+        >
+          {moveBadgeText(move.type)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function isBadMove(type: MoveEvaluation["type"]) {
   return ["inaccuracy", "mistake", "blunder", "missed win"].includes(type);
 }
@@ -110,25 +199,50 @@ function sideSummary(analysis: GameAnalysis, color: "w" | "b") {
   };
 }
 
-function EvaluationBar({ score }: { score: number }) {
+function EvaluationBar({
+  score,
+  orientation,
+}: {
+  score: number;
+  orientation: "white" | "black";
+}) {
   const whiteShare = Math.max(4, Math.min(96, 50 + Math.max(-800, Math.min(800, score)) / 16));
 
   return (
     <div className="grid h-full min-h-[28rem] w-12 overflow-hidden rounded-2xl border bg-black text-xs font-black shadow-inner">
-      <div className="flex items-start justify-center bg-black px-1 py-2 text-white">
-        {score < -80 ? formatEval(score) : ""}
+      <div
+        className="flex items-start justify-center px-1 py-2"
+        style={{
+          backgroundColor: orientation === "white" ? "#000" : "#fff",
+          color: orientation === "white" ? "#fff" : "#000",
+        }}
+      >
+        {orientation === "white"
+          ? score < -80 ? formatEval(score) : ""
+          : score > 80 ? formatEval(score) : ""}
       </div>
       <div className="relative bg-black">
         <div
-          className="absolute bottom-0 left-0 right-0 bg-white transition-all"
+          className={cn(
+            "absolute left-0 right-0 bg-white transition-all",
+            orientation === "white" ? "bottom-0" : "top-0",
+          )}
           style={{ height: `${whiteShare}%` }}
         />
         <div className="absolute inset-0 grid place-items-center text-[11px] text-white mix-blend-difference">
           {formatEval(score)}
         </div>
       </div>
-      <div className="flex items-end justify-center bg-white px-1 py-2 text-black">
-        {score > 80 ? formatEval(score) : ""}
+      <div
+        className="flex items-end justify-center px-1 py-2"
+        style={{
+          backgroundColor: orientation === "white" ? "#fff" : "#000",
+          color: orientation === "white" ? "#000" : "#fff",
+        }}
+      >
+        {orientation === "white"
+          ? score > 80 ? formatEval(score) : ""
+          : score < -80 ? formatEval(score) : ""}
       </div>
     </div>
   );
@@ -148,6 +262,7 @@ export function AnalysisClient() {
   const [analysis, setAnalysis] = useState<GameAnalysis>(
     analysisForGame(initialGame),
   );
+  const [orientation, setOrientation] = useState<"white" | "black">("white");
   const [engineProgress, setEngineProgress] = useState<{ done: number; total: number } | null>(null);
   const [engineError, setEngineError] = useState("");
 
@@ -209,7 +324,7 @@ export function AnalysisClient() {
     ply <= 0
       ? analysis.evaluations[0]?.scoreBefore ?? 0
       : analysis.evaluations[Math.min(ply - 1, analysis.evaluations.length - 1)]?.scoreAfter ?? 0;
-  const selectedMove = analysis.evaluations[selectedIndex] ?? analysis.evaluations.at(-1);
+  const selectedMove = ply > 0 ? analysis.evaluations[selectedIndex] ?? analysis.evaluations.at(-1) : undefined;
   const reviewCounts = summarizeMoveTypes(analysis.evaluations);
   const evalPoints = analysis.evaluations.map((item, index) => ({
     x: analysis.evaluations.length <= 1 ? 0 : (index / (analysis.evaluations.length - 1)) * 100,
@@ -232,19 +347,40 @@ export function AnalysisClient() {
     bestMoveUci && bestMoveUci.length >= 4
       ? [bestMoveUci.slice(0, 2), bestMoveUci.slice(2, 4)]
       : [];
-  const squareStyles = Object.fromEntries(
-    bestMoveSquares.map((square) => [
-      square,
-      {
-        background:
-          "radial-gradient(circle, rgba(96, 197, 141, 0.6) 34%, rgba(96, 197, 141, 0.22) 36%, transparent 42%)",
-      },
-    ]),
-  );
+  const playedMoveSquares =
+    selectedMove?.uci && selectedMove.uci.length >= 4
+      ? [selectedMove.uci.slice(0, 2), selectedMove.uci.slice(2, 4)]
+      : [];
+  const squareStyles = {
+    ...Object.fromEntries(
+      playedMoveSquares.map((square) => [
+        square,
+        {
+          background:
+            "linear-gradient(135deg, rgba(240, 184, 77, 0.62), rgba(240, 184, 77, 0.28))",
+        },
+      ]),
+    ),
+    ...Object.fromEntries(
+      bestMoveSquares.map((square) => [
+        square,
+        {
+          background:
+            "radial-gradient(circle, rgba(96, 197, 141, 0.6) 34%, rgba(96, 197, 141, 0.22) 36%, transparent 42%)",
+        },
+      ]),
+    ),
+  };
 
   function jumpToMove(index: number) {
     setSelectedIndex(index);
     setPly(index + 1);
+  }
+
+  function jumpToPly(targetPly: number) {
+    const nextPly = Math.max(0, Math.min(game.moves.length, targetPly));
+    setPly(nextPly);
+    setSelectedIndex(Math.max(0, nextPly - 1));
   }
 
   return (
@@ -285,31 +421,41 @@ export function AnalysisClient() {
         ) : null}
 
         <div className="mx-auto grid max-w-[min(92vh,860px)] grid-cols-[3rem_minmax(0,1fr)] gap-3">
-          <EvaluationBar score={currentEval} />
-          <Chessboard
-            options={{
-              position: positionAt(game.moves, ply),
-              allowDragging: false,
-              squareStyles,
-              boardStyle: {
-                borderRadius: "1.5rem",
-                boxShadow: "0 24px 80px rgba(0,0,0,0.22)",
-                overflow: "hidden",
-              },
-              lightSquareStyle: { backgroundColor: "#e8d4aa" },
-              darkSquareStyle: { backgroundColor: "#58764a" },
-            }}
-          />
+          <EvaluationBar score={currentEval} orientation={orientation} />
+          <div className="relative">
+            <Chessboard
+              options={{
+                position: positionAt(game.moves, ply),
+                boardOrientation: orientation,
+                allowDragging: false,
+                squareStyles,
+                boardStyle: {
+                  borderRadius: "1.5rem",
+                  boxShadow: "0 24px 80px rgba(0,0,0,0.22)",
+                  overflow: "hidden",
+                },
+                lightSquareStyle: { backgroundColor: "#e8d4aa" },
+                darkSquareStyle: { backgroundColor: "#58764a" },
+              }}
+            />
+            <BoardMoveBadge move={selectedMove} orientation={orientation} />
+          </div>
         </div>
 
-        <div className="mt-5 flex items-center justify-center gap-3">
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
           <Button
             variant="secondary"
-            onClick={() => {
-              const nextPly = Math.max(0, ply - 1);
-              setPly(nextPly);
-              setSelectedIndex(Math.max(0, nextPly - 1));
-            }}
+            aria-label="Go to start"
+            title="Go to start"
+            onClick={() => jumpToPly(0)}
+          >
+            <ChevronsLeft className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="secondary"
+            aria-label="Previous move"
+            title="Previous move"
+            onClick={() => jumpToPly(ply - 1)}
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -318,15 +464,54 @@ export function AnalysisClient() {
           </span>
           <Button
             variant="secondary"
-            onClick={() => {
-              const nextPly = Math.min(game.moves.length, ply + 1);
-              setPly(nextPly);
-              setSelectedIndex(Math.max(0, nextPly - 1));
-            }}
+            aria-label="Next move"
+            title="Next move"
+            onClick={() => jumpToPly(ply + 1)}
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
+          <Button
+            variant="secondary"
+            aria-label="Go to end"
+            title="Go to end"
+            onClick={() => jumpToPly(game.moves.length)}
+          >
+            <ChevronsRight className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => setOrientation((side) => (side === "white" ? "black" : "white"))}
+          >
+            <Shuffle className="mr-2 h-4 w-4" />
+            Flip Board
+          </Button>
         </div>
+        {selectedMove ? (
+          <div className="mx-auto mt-4 grid max-w-[min(92vh,860px)] gap-2 rounded-2xl border bg-muted p-4 text-sm sm:grid-cols-[1fr_1fr_1.3fr]">
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground">Ход</p>
+              <p className="mt-1 font-mono text-lg font-black">
+                {selectedMove.moveNumber}. {selectedMove.san}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground">Оценка</p>
+              <p className="mt-1 font-mono text-lg font-black">
+                {formatEval(selectedMove.scoreBefore)} → {formatEval(selectedMove.scoreAfter)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground">
+                {isBadMove(selectedMove.type) ? "Лучше было" : "Качество"}
+              </p>
+              <p className="mt-1 truncate font-semibold">
+                {isBadMove(selectedMove.type)
+                  ? selectedMove.bestMove ?? "линия движка"
+                  : moveTypeLabel(selectedMove.type)}
+              </p>
+            </div>
+          </div>
+        ) : null}
       </Card>
 
       <aside className="grid gap-4 content-start">

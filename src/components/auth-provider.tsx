@@ -17,6 +17,7 @@ import {
   isSupabaseConfigured,
   upsertProfileToSupabase,
 } from "@/lib/supabase-data";
+import { STARTING_RATING } from "@/lib/rating";
 
 type AuthContextValue = {
   user: UserProfile | null;
@@ -43,6 +44,18 @@ function initials(name: string) {
     .join("");
 }
 
+function withRatingDefaults(profile: UserProfile): UserProfile {
+  return {
+    ...profile,
+    rating: profile.rating ?? STARTING_RATING,
+    bulletRating: profile.bulletRating ?? profile.rating ?? STARTING_RATING,
+    blitzRating: profile.blitzRating ?? profile.rating ?? STARTING_RATING,
+    rapidRating: profile.rapidRating ?? profile.rating ?? STARTING_RATING,
+    classicalRating: profile.classicalRating ?? profile.rating ?? STARTING_RATING,
+    puzzleRating: profile.puzzleRating ?? STARTING_RATING,
+  };
+}
+
 async function hashPassword(password: string) {
   const normalized = password.trim();
   const data = new TextEncoder().encode(normalized);
@@ -53,7 +66,7 @@ async function hashPassword(password: string) {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [profiles, setProfiles] = useState<UserProfile[]>(() => getProfiles());
+  const [profiles, setProfiles] = useState<UserProfile[]>(() => getProfiles().map(withRatingDefaults));
   const [userId, setUserId] = useState<string | null>(() => getSessionUserId());
   const authMode = isSupabaseConfigured() ? "supabase" : "local";
 
@@ -144,8 +157,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email,
         username,
         city: "",
+        country: "",
         avatar: initials(username),
-        rating: 1200,
+        rating: STARTING_RATING,
+        bulletRating: STARTING_RATING,
+        blitzRating: STARTING_RATING,
+        rapidRating: STARTING_RATING,
+        classicalRating: STARTING_RATING,
+        puzzleRating: STARTING_RATING,
         gamesCount: 0,
         wins: 0,
         losses: 0,
@@ -174,15 +193,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           ...existing,
           username,
           city: existing.city ?? "",
+          country: existing.country ?? "",
           avatar: initials(username) || existing.avatar || "K",
+          bulletRating: existing.bulletRating ?? existing.rating ?? STARTING_RATING,
+          blitzRating: existing.blitzRating ?? existing.rating ?? STARTING_RATING,
+          rapidRating: existing.rapidRating ?? existing.rating ?? STARTING_RATING,
+          classicalRating: existing.classicalRating ?? existing.rating ?? STARTING_RATING,
+          puzzleRating: existing.puzzleRating ?? STARTING_RATING,
         }
       : {
           id: crypto.randomUUID(),
           email,
           username,
           city: "",
+          country: "",
           avatar: initials(username) || "K",
-          rating: 1200,
+          rating: STARTING_RATING,
+          bulletRating: STARTING_RATING,
+          blitzRating: STARTING_RATING,
+          rapidRating: STARTING_RATING,
+          classicalRating: STARTING_RATING,
+          puzzleRating: STARTING_RATING,
           gamesCount: 0,
           wins: 0,
           losses: 0,
@@ -252,7 +283,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const updatedProfile = {
       ...user,
       ...patch,
-      avatar: patch.username ? initials(patch.username) : user.avatar,
+      avatar: patch.avatar ?? (patch.username ? initials(patch.username) : user.avatar),
     };
     const supabase = getSupabaseClient();
     if (supabase) {

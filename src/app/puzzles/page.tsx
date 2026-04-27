@@ -322,7 +322,7 @@ export default function PuzzlesPage() {
         failAttempt();
         playPuzzleTone("error");
         setMessage(
-          `Not quite (${change}). Rating ${nextRating}. Checks, captures, threats. Try to find the forcing move.`,
+          `Error: not quite (${change}). Rating ${nextRating}. Checks, captures, threats. Try to find the forcing move.`,
         );
         setSelectedSquare(null);
         return false;
@@ -346,7 +346,7 @@ export default function PuzzlesPage() {
           setPosition(replyBoard.fen());
           setAnswerSquares([reply.from, reply.to]);
           setLinePly(nextLinePly + 1);
-          setMessage("Good first move. Opponent replied. Find the next best move in the tactic.");
+          setMessage("Success: good first move. Opponent replied. Find the next best move in the tactic.");
         }, 450);
         return true;
       }
@@ -354,7 +354,7 @@ export default function PuzzlesPage() {
       const { earned, change, nextRating } = awardScore(current.solved);
       setLinePly(0);
       setMessage(
-        `Correct: +${earned} points, rating ${change >= 0 ? "+" : ""}${change} to ${nextRating}. ${puzzle.explanation}`,
+        `Success: correct. +${earned} points, rating ${change >= 0 ? "+" : ""}${change} to ${nextRating}. ${puzzle.explanation}`,
       );
       if (mode === "rush") window.setTimeout(nextPuzzle, 650);
       return true;
@@ -391,6 +391,14 @@ export default function PuzzlesPage() {
     setAnswerSquares([source, target]);
     setSelectedSquare(source);
     setMessage(`Answer: ${source}-${target}. ${puzzle.explanation}`);
+  }
+
+  function showHint() {
+    const expected = expectedMoveFor(puzzle, linePly);
+    const source = expected.slice(0, 2);
+    setSelectedSquare(source);
+    setAnswerSquares([source]);
+    setMessage(`Hint: ${puzzle.hint ?? "Look for checks, captures, and threats."}`);
   }
 
   const squareStyles = Object.fromEntries([
@@ -469,9 +477,13 @@ export default function PuzzlesPage() {
             ) : (
               <Button onClick={nextPuzzle}>Next Puzzle</Button>
             )}
+            <Button variant="secondary" onClick={showHint}>
+              <Lightbulb className="mr-2 h-4 w-4" />
+              Hint
+            </Button>
             <Button variant="secondary" onClick={showAnswer}>
               <Lightbulb className="mr-2 h-4 w-4" />
-              Show answer
+              Show solution
             </Button>
           </div>
           {disabled ? (
