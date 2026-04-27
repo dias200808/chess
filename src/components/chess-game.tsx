@@ -726,6 +726,7 @@ export function ChessGame({
   const reviewCounts = summarizeMoveTypes(activeAnalysis.evaluations);
   const isReviewPending = isGameOver && moves.length >= 2 && Boolean(analysisProgress) && !postGameAnalysis;
   const canOpenReview = isGameOver && moves.length > 0;
+  const hasDeepAnalysis = Boolean(postGameAnalysis);
   const activeSide = chess.turn() === "w" ? "white" : "black";
   const canOfferDraw = !isGameOver && !drawOfferedBy && !isBotTurn;
   const canRespondToDraw = Boolean(
@@ -891,7 +892,7 @@ export function ChessGame({
                         Подожди пару секунд: так разбор не сохранит сырой список, где все ходы выглядят хорошими.
                       </p>
                     </div>
-                  ) : (
+                  ) : hasDeepAnalysis ? (
                     <>
                       <div className="mt-4 grid grid-cols-3 gap-2">
                         {postGameStats.map((item) => (
@@ -905,6 +906,14 @@ export function ChessGame({
                         {postGameRatingText}
                       </p>
                     </>
+                  ) : (
+                    <div className="mt-4 rounded-xl bg-muted p-4">
+                      <p className="text-sm font-semibold">Партия ещё не проверена Stockfish.</p>
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                        Нажмите «Разбор», чтобы открыть проверку. До анализа я не буду показывать проценты точности
+                        и оценки ходов, чтобы не вводить в заблуждение.
+                      </p>
+                    </div>
                   )}
 
                   <div className="mt-4 grid grid-cols-2 gap-2">
@@ -1102,45 +1111,54 @@ export function ChessGame({
             ) : postGameAnalysis ? (
               <Badge>Глубокий разбор</Badge>
             ) : (
-              <Badge>Быстрый разбор</Badge>
+              <Badge>Не проверено</Badge>
             )}
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <div className="rounded-2xl bg-muted p-4">
-              <p className="text-sm text-muted-foreground">Точность белых</p>
-              <p className="font-mono text-3xl font-black">{activeAnalysis.whiteAccuracy}%</p>
-            </div>
-            <div className="rounded-2xl bg-muted p-4">
-              <p className="text-sm text-muted-foreground">Точность черных</p>
-              <p className="font-mono text-3xl font-black">{activeAnalysis.blackAccuracy}%</p>
-            </div>
-          </div>
-
-          <div className="mt-4 grid grid-cols-2 gap-2">
-            {reviewCounts.map((item) => (
-              <div key={item.type} className="rounded-2xl bg-muted px-3 py-3">
-                <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
-                  {moveTypeLabel(item.type)}
-                </p>
-                <p className="mt-2 font-mono text-2xl font-black">{item.count}</p>
+          {hasDeepAnalysis ? (
+            <>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <div className="rounded-2xl bg-muted p-4">
+                  <p className="text-sm text-muted-foreground">Точность белых</p>
+                  <p className="font-mono text-3xl font-black">{activeAnalysis.whiteAccuracy}%</p>
+                </div>
+                <div className="rounded-2xl bg-muted p-4">
+                  <p className="text-sm text-muted-foreground">Точность черных</p>
+                  <p className="font-mono text-3xl font-black">{activeAnalysis.blackAccuracy}%</p>
+                </div>
               </div>
-            ))}
-          </div>
 
-          <p className="mt-4 text-sm leading-6 text-muted-foreground">{activeAnalysis.summary}</p>
-          <p className="mt-3 rounded-2xl bg-muted p-4 text-sm">{activeAnalysis.trainingFocus}</p>
-          {activeAnalysis.bestMoment ? (
-            <p className="mt-3 text-sm text-muted-foreground">
-              Лучший момент: {activeAnalysis.bestMoment.moveNumber}. {activeAnalysis.bestMoment.san} (
-              {moveTypeLabel(activeAnalysis.bestMoment.type).toLowerCase()}).
-            </p>
-          ) : null}
-          {activeAnalysis.worstMoment ? (
-            <p className="mt-1 text-sm text-muted-foreground">
-              Критический момент: {activeAnalysis.worstMoment.moveNumber}. {activeAnalysis.worstMoment.san} (
-              {moveTypeLabel(activeAnalysis.worstMoment.type).toLowerCase()}).
-            </p>
-          ) : null}
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                {reviewCounts.map((item) => (
+                  <div key={item.type} className="rounded-2xl bg-muted px-3 py-3">
+                    <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                      {moveTypeLabel(item.type)}
+                    </p>
+                    <p className="mt-2 font-mono text-2xl font-black">{item.count}</p>
+                  </div>
+                ))}
+              </div>
+
+              <p className="mt-4 text-sm leading-6 text-muted-foreground">{activeAnalysis.summary}</p>
+              <p className="mt-3 rounded-2xl bg-muted p-4 text-sm">{activeAnalysis.trainingFocus}</p>
+              {activeAnalysis.bestMoment ? (
+                <p className="mt-3 text-sm text-muted-foreground">
+                  Лучший момент: {activeAnalysis.bestMoment.moveNumber}. {activeAnalysis.bestMoment.san} (
+                  {moveTypeLabel(activeAnalysis.bestMoment.type).toLowerCase()}).
+                </p>
+              ) : null}
+              {activeAnalysis.worstMoment ? (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Критический момент: {activeAnalysis.worstMoment.moveNumber}. {activeAnalysis.worstMoment.san} (
+                  {moveTypeLabel(activeAnalysis.worstMoment.type).toLowerCase()}).
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <div className="mt-4 rounded-2xl bg-muted p-4 text-sm leading-6 text-muted-foreground">
+              Разбор ещё не готов. Нажмите Analyze/Разбор, чтобы открыть страницу проверки; оценки ходов появятся
+              только после Stockfish.
+            </div>
+          )}
           {analysisError ? (
             <p className="mt-3 rounded-2xl bg-destructive/10 p-3 text-sm text-destructive">
               {analysisError}
@@ -1165,7 +1183,7 @@ export function ChessGame({
                     <span className="pt-2 font-mono text-muted-foreground">{index + 1}.</span>
                     <div className="rounded-xl bg-muted px-3 py-2 font-mono">
                       <div>{whiteMove}</div>
-                      {whiteEval ? (
+                      {hasDeepAnalysis && whiteEval ? (
                         <div className="mt-1 text-[11px] font-semibold text-muted-foreground">
                           {moveTypeLabel(whiteEval.type)}
                         </div>
@@ -1173,7 +1191,7 @@ export function ChessGame({
                     </div>
                     <div className="rounded-xl bg-muted px-3 py-2 font-mono">
                       <div>{blackMove ?? ""}</div>
-                      {blackEval ? (
+                      {hasDeepAnalysis && blackEval ? (
                         <div className="mt-1 text-[11px] font-semibold text-muted-foreground">
                           {moveTypeLabel(blackEval.type)}
                         </div>

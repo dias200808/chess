@@ -303,7 +303,7 @@ export function AnalysisClient() {
       saveGame(updatedGame);
       await saveGameToSupabase(updatedGame).catch(() => null);
     } catch {
-      setEngineError("Stockfish не смог завершить разбор в этом браузере. Показана быстрая версия.");
+      setEngineError("Stockfish не смог завершить разбор в этом браузере. Ходы пока не считаются проверенными.");
     } finally {
       setEngineProgress(null);
     }
@@ -320,6 +320,7 @@ export function AnalysisClient() {
     return () => window.clearTimeout(timer);
   }, [analysis.evaluations, game.id, game.moves.length, requestedId, runDeepAnalysis]);
 
+  const hasStockfishAnalysis = analysis.evaluations.some((item) => item.engine === "stockfish");
   const currentEval =
     ply <= 0
       ? analysis.evaluations[0]?.scoreBefore ?? 0
@@ -334,15 +335,17 @@ export function AnalysisClient() {
     .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
     .join(" ");
   const keyMoments =
-    analysis.keyMoments?.length
+    hasStockfishAnalysis && analysis.keyMoments?.length
       ? analysis.keyMoments
-      : analysis.evaluations
+      : hasStockfishAnalysis
+        ? analysis.evaluations
           .filter((item) => isBadMove(item.type) || item.type === "checkmate")
-          .slice(0, 8);
+          .slice(0, 8)
+        : [];
   const whiteSummary = sideSummary(analysis, "w");
   const blackSummary = sideSummary(analysis, "b");
   const bestMoveUci =
-    selectedMove && isBadMove(selectedMove.type) ? selectedMove.bestMoveUci : undefined;
+    hasStockfishAnalysis && selectedMove && isBadMove(selectedMove.type) ? selectedMove.bestMoveUci : undefined;
   const bestMoveSquares =
     bestMoveUci && bestMoveUci.length >= 4
       ? [bestMoveUci.slice(0, 2), bestMoveUci.slice(2, 4)]
@@ -395,13 +398,21 @@ export function AnalysisClient() {
             <Badge>{game.result}</Badge>
             {engineProgress ? (
               <Badge>Analyzing {Math.round((engineProgress.done / engineProgress.total) * 100)}%</Badge>
-            ) : analysis.evaluations.some((item) => item.engine === "stockfish") ? (
+            ) : hasStockfishAnalysis ? (
               <Badge>Stockfish</Badge>
             ) : (
-              <Badge>Fast review</Badge>
+              <Badge>Не проверено</Badge>
             )}
           </div>
         </div>
+
+        {!hasStockfishAnalysis ? (
+          <div className="mb-4 rounded-2xl border bg-muted p-4 text-sm leading-6 text-muted-foreground">
+            {engineProgress
+              ? "Партия сейчас проверяется Stockfish. До окончания анализа я не показываю качество ходов и точность."
+              : "Партия пока не проанализирована Stockfish. Нажмите «Analyze with Stockfish», чтобы получить настоящие оценки ходов."}
+          </div>
+        ) : null}
 
         {engineProgress ? (
           <div className="mb-4 rounded-2xl border bg-muted p-4">
@@ -438,7 +449,7 @@ export function AnalysisClient() {
                 darkSquareStyle: { backgroundColor: "#58764a" },
               }}
             />
-            <BoardMoveBadge move={selectedMove} orientation={orientation} />
+            <BoardMoveBadge move={hasStockfishAnalysis ? selectedMove : undefined} orientation={orientation} />
           </div>
         </div>
 
@@ -460,7 +471,7 @@ export function AnalysisClient() {
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <span className="font-mono text-sm">
-            {ply} / {game.moves.length} · {formatEval(currentEval)}
+            {ply} / {game.moves.length} · {hasStockfishAnalysis ? formatEval(currentEval) : "not analyzed"}
           </span>
           <Button
             variant="secondary"
@@ -497,15 +508,19 @@ export function AnalysisClient() {
             <div>
               <p className="text-xs font-semibold text-muted-foreground">Оценка</p>
               <p className="mt-1 font-mono text-lg font-black">
-                {formatEval(selectedMove.scoreBefore)} → {formatEval(selectedMove.scoreAfter)}
+                {hasStockfishAnalysis
+                  ? `${formatEval(selectedMove.scoreBefore)} → ${formatEval(selectedMove.scoreAfter)}`
+                  : "not checked"}
               </p>
             </div>
             <div>
               <p className="text-xs font-semibold text-muted-foreground">
-                {isBadMove(selectedMove.type) ? "Лучше было" : "Качество"}
+                {hasStockfishAnalysis && isBadMove(selectedMove.type) ? "Лучше было" : "Качество"}
               </p>
               <p className="mt-1 truncate font-semibold">
-                {isBadMove(selectedMove.type)
+                {!hasStockfishAnalysis
+                  ? "Ожидает Stockfish"
+                  : isBadMove(selectedMove.type)
                   ? selectedMove.bestMove ?? "линия движка"
                   : moveTypeLabel(selectedMove.type)}
               </p>
@@ -517,8 +532,17 @@ export function AnalysisClient() {
       <aside className="grid gap-4 content-start">
         <Card>
           <h2 className="text-xl font-black">AI Coach</h2>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">{analysis.summary}</p>
-          <p className="mt-4 rounded-2xl bg-muted p-4 text-sm font-medium">{analysis.trainingFocus}</p>
+          {hasStockfishAnalysis ? (
+            <>
+              <p className="mt-3 text-sm leading-6 text-muted-foreground">{analysis.summary}</p>
+              <p className="mt-4 rounded-2xl bg-muted p-4 text-sm font-medium">{analysis.trainingFocus}</p>
+            </>
+          ) : (
+            <p className="mt-3 rounded-2xl bg-muted p-4 text-sm leading-6 text-muted-foreground">
+              Разбор ещё не готов. Stockfish должен проверить позицию до и после каждого хода; только после этого
+              появятся ошибки, лучшие ходы и точность.
+            </p>
+          )}
           <Button
             className="mt-4 w-full"
             variant="secondary"
@@ -540,15 +564,15 @@ export function AnalysisClient() {
         <div className="grid grid-cols-2 gap-4">
           <Card>
             <p className="text-sm text-muted-foreground">White accuracy</p>
-            <p className="font-mono text-4xl font-black">{analysis.whiteAccuracy}%</p>
+            <p className="font-mono text-4xl font-black">{hasStockfishAnalysis ? `${analysis.whiteAccuracy}%` : "--"}</p>
           </Card>
           <Card>
             <p className="text-sm text-muted-foreground">Black accuracy</p>
-            <p className="font-mono text-4xl font-black">{analysis.blackAccuracy}%</p>
+            <p className="font-mono text-4xl font-black">{hasStockfishAnalysis ? `${analysis.blackAccuracy}%` : "--"}</p>
           </Card>
         </div>
 
-        {selectedMove ? (
+        {hasStockfishAnalysis && selectedMove ? (
           <Card>
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-xl font-black">Move {selectedMove.moveNumber}</h2>
@@ -593,15 +617,21 @@ export function AnalysisClient() {
                         key={`${move.san}-${offset}`}
                         className={cn(
                           "rounded-2xl border px-3 py-2 text-left transition hover:-translate-y-0.5",
-                          moveClassName(move.type),
+                          hasStockfishAnalysis ? moveClassName(move.type) : "border-border bg-muted text-foreground",
                           selectedIndex === move.ply - 1 && "ring-2 ring-primary",
                         )}
                         onClick={() => jumpToMove(move.ply - 1)}
                       >
                         <span className="font-mono font-black">{move.san}</span>
-                        <span className="mt-1 block text-xs font-semibold opacity-80">
-                          {moveTypeLabel(move.type)}
-                        </span>
+                        {hasStockfishAnalysis ? (
+                          <span className="mt-1 block text-xs font-semibold opacity-80">
+                            {moveTypeLabel(move.type)}
+                          </span>
+                        ) : (
+                          <span className="mt-1 block text-xs font-semibold opacity-70">
+                            not analyzed
+                          </span>
+                        )}
                       </button>
                     ) : (
                       <span key={`empty-${offset}`} />
@@ -613,6 +643,7 @@ export function AnalysisClient() {
           </div>
         </Card>
 
+        {hasStockfishAnalysis ? (
         <Card>
           <h2 className="text-xl font-black">Game Review Summary</h2>
           <div className="mt-4 grid gap-3 text-sm">
@@ -639,6 +670,7 @@ export function AnalysisClient() {
             })}
           </div>
         </Card>
+        ) : null}
 
         <Card>
           <h2 className="text-xl font-black">Key Moments</h2>
@@ -666,11 +698,14 @@ export function AnalysisClient() {
             </div>
           ) : (
             <p className="mt-3 text-sm text-muted-foreground">
-              No major mistakes found after the current analysis.
+              {hasStockfishAnalysis
+                ? "No major mistakes found after the current analysis."
+                : "Key moments will appear after Stockfish finishes the analysis."}
             </p>
           )}
         </Card>
 
+        {hasStockfishAnalysis ? (
         <Card>
           <h2 className="text-xl font-black">Evaluation Graph</h2>
           <svg className="mt-4 h-32 w-full overflow-visible rounded-2xl bg-muted" viewBox="0 0 100 100" preserveAspectRatio="none">
@@ -681,7 +716,9 @@ export function AnalysisClient() {
             Positive means White is better. Negative means Black is better.
           </p>
         </Card>
+        ) : null}
 
+        {hasStockfishAnalysis ? (
         <Card>
           <h2 className="text-xl font-black">Move Quality</h2>
           <div className="mt-4 grid grid-cols-2 gap-3">
@@ -695,6 +732,7 @@ export function AnalysisClient() {
             ))}
           </div>
         </Card>
+        ) : null}
 
         <LinkButton href="/history" variant="secondary">Back to history</LinkButton>
       </aside>
