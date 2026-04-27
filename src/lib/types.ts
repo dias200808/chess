@@ -199,6 +199,12 @@ export type Room = {
   moves?: string[];
   status: "waiting" | "ready" | "placeholder" | "finished";
   result?: string;
+  timeControl?: string;
+  matchType?: "invite" | "quick";
+  hostKey?: string;
+  guestKey?: string;
+  hostRating?: number;
+  guestRating?: number;
   createdAt: string;
   updatedAt?: string;
 };

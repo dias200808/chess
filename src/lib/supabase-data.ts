@@ -240,6 +240,114 @@ export async function createRoomInSupabase(userId: string) {
   return mapRoom(data);
 }
 
+export async function createGuestRoomInSupabase(timeControl = "10-0") {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("rooms")
+    .insert({
+      white_user_id: null,
+      black_user_id: null,
+      current_position: START_FEN,
+      moves: [],
+      status: "waiting",
+      time_control: timeControl,
+      match_type: "invite",
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return mapRoom(data);
+}
+
+export async function findWaitingQuickRoom({
+  timeControl,
+  playerKey,
+  rating,
+}: {
+  timeControl: string;
+  playerKey: string;
+  rating?: number | null;
+}) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("rooms")
+    .select("*")
+    .eq("match_type", "quick")
+    .eq("status", "waiting")
+    .eq("time_control", timeControl)
+    .neq("host_key", playerKey)
+    .order("created_at", { ascending: true })
+    .limit(25);
+  if (error) throw error;
+  const rooms = (data ?? []).map((row) => mapRoom(row));
+  if (!rating) return rooms[0] ?? null;
+  return (
+    rooms.find((room) => !room.hostRating || Math.abs(room.hostRating - rating) <= 300) ??
+    rooms[0] ??
+    null
+  );
+}
+
+export async function createQuickMatchRoom({
+  timeControl,
+  playerKey,
+  rating,
+}: {
+  timeControl: string;
+  playerKey: string;
+  rating?: number | null;
+}) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("rooms")
+    .insert({
+      white_user_id: null,
+      black_user_id: null,
+      current_position: START_FEN,
+      moves: [],
+      status: "waiting",
+      time_control: timeControl,
+      match_type: "quick",
+      host_key: playerKey,
+      host_rating: rating ?? null,
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return mapRoom(data);
+}
+
+export async function joinQuickMatchRoom({
+  roomId,
+  playerKey,
+  rating,
+}: {
+  roomId: string;
+  playerKey: string;
+  rating?: number | null;
+}) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("rooms")
+    .update({
+      status: "ready",
+      guest_key: playerKey,
+      guest_rating: rating ?? null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", roomId)
+    .eq("status", "waiting")
+    .neq("host_key", playerKey)
+    .select("*")
+    .maybeSingle();
+  if (error) throw error;
+  return data ? mapRoom(data) : null;
+}
+
 export async function joinRoomInSupabase(roomId: string, userId: string) {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
@@ -251,6 +359,20 @@ export async function joinRoomInSupabase(roomId: string, userId: string) {
   const { data, error } = await supabase.from("rooms").update(patch).eq("id", roomId).select("*").single();
   if (error) throw error;
   return mapRoom(data);
+}
+
+export async function joinGuestRoomInSupabase(roomId: string) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("rooms")
+    .update({ status: "ready", updated_at: new Date().toISOString() })
+    .eq("id", roomId)
+    .eq("status", "waiting")
+    .select("*")
+    .maybeSingle();
+  if (error) throw error;
+  return data ? mapRoom(data) : null;
 }
 
 export async function fetchRoomFromSupabase(roomId: string) {
@@ -304,6 +426,12 @@ export function mapRoom(row: Record<string, unknown>): Room {
     moves: Array.isArray(row.moves) ? (row.moves as string[]) : [],
     status: String(row.status ?? "waiting") as Room["status"],
     result: row.result ? String(row.result) : undefined,
+    timeControl: row.time_control ? String(row.time_control) : undefined,
+    matchType: String(row.match_type ?? "invite") as Room["matchType"],
+    hostKey: row.host_key ? String(row.host_key) : undefined,
+    guestKey: row.guest_key ? String(row.guest_key) : undefined,
+    hostRating: row.host_rating === null || row.host_rating === undefined ? undefined : Number(row.host_rating),
+    guestRating: row.guest_rating === null || row.guest_rating === undefined ? undefined : Number(row.guest_rating),
     createdAt: String(row.created_at ?? new Date().toISOString()),
     updatedAt: row.updated_at ? String(row.updated_at) : undefined,
   };

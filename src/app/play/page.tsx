@@ -1,14 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Bot, ChevronLeft, History, Swords, Trophy, Users } from "lucide-react";
+import { Bot, ChevronLeft, Globe2, History, Loader2, Swords, Trophy, Users } from "lucide-react";
 import { BoardStagePreview } from "@/components/board-stage-preview";
 import { ChessGame } from "@/components/chess-game";
 import { getTimeControlPreset, timeControlPresets } from "@/lib/game-config";
 import { Badge, Button, LinkButton, SelectField } from "@/components/ui";
+import { useAuth } from "@/components/auth-provider";
+import {
+  createQuickMatchRoom,
+  findWaitingQuickRoom,
+  isSupabaseConfigured,
+  joinQuickMatchRoom,
+} from "@/lib/supabase-data";
+import { ratingForProfile, ratingTypeForTimeControl } from "@/lib/rating";
 
 function StartTile({
   title,
@@ -37,12 +45,81 @@ function StartTile({
   );
 }
 
+function guestPlayerKey() {
+  const key = "knightly-guest-player-key";
+  const existing = localStorage.getItem(key);
+  if (existing) return existing;
+  const next = `guest:${crypto.randomUUID()}`;
+  localStorage.setItem(key, next);
+  return next;
+}
+
+function roomSideKey(roomId: string) {
+  return `knightly-room:${roomId}:side`;
+}
+
 function PlayPageInner() {
   const params = useSearchParams();
+  const router = useRouter();
+  const { user } = useAuth();
   const initialFen = params.get("fen") ?? undefined;
   const [started, setStarted] = useState(false);
   const [timeControlId, setTimeControlId] = useState("10-0");
+  const [isQuickMatching, setIsQuickMatching] = useState(false);
+  const [quickMessage, setQuickMessage] = useState("");
   const timeControl = getTimeControlPreset(timeControlId);
+  const ratingType = ratingTypeForTimeControl(timeControl);
+  const playerRating = user && ratingType ? ratingForProfile(user, ratingType) : null;
+
+  async function startQuickMatch() {
+    if (!isSupabaseConfigured()) {
+      setQuickMessage("Online matchmaking needs Supabase env vars on Vercel.");
+      return;
+    }
+
+    setIsQuickMatching(true);
+    setQuickMessage("Searching for an opponent...");
+
+    try {
+      const playerKey = user ? `user:${user.id}` : guestPlayerKey();
+      const waitingRoom = await findWaitingQuickRoom({
+        timeControl: timeControl.id,
+        playerKey,
+        rating: playerRating,
+      });
+
+      if (waitingRoom) {
+        const joinedRoom = await joinQuickMatchRoom({
+          roomId: waitingRoom.id,
+          playerKey,
+          rating: playerRating,
+        });
+        if (joinedRoom) {
+          localStorage.setItem(roomSideKey(joinedRoom.id), "black");
+          router.push(`/friend?room=${joinedRoom.id}`);
+          return;
+        }
+      }
+
+      const createdRoom = await createQuickMatchRoom({
+        timeControl: timeControl.id,
+        playerKey,
+        rating: playerRating,
+      });
+
+      if (!createdRoom) {
+        setQuickMessage("Could not create matchmaking room.");
+        setIsQuickMatching(false);
+        return;
+      }
+
+      localStorage.setItem(roomSideKey(createdRoom.id), "white");
+      router.push(`/friend?room=${createdRoom.id}`);
+    } catch {
+      setQuickMessage("Matchmaking failed. Check Supabase room policies.");
+      setIsQuickMatching(false);
+    }
+  }
 
   if (started) {
     return (
@@ -104,6 +181,31 @@ function PlayPageInner() {
         </div>
 
         <div className="grid gap-3">
+          <StartTile
+            title="Quick Online"
+            text={
+              user
+                ? `Finds a live opponent near your ${ratingType ?? "overall"} rating (${playerRating ?? 1200}).`
+                : "Play instantly as a guest. No account, no rating, just a live online room."
+            }
+            icon={Globe2}
+            action={
+              <div className="grid gap-2">
+                <Button onClick={startQuickMatch} disabled={isQuickMatching || Boolean(initialFen)}>
+                  {isQuickMatching ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Globe2 className="mr-2 h-4 w-4" />
+                  )}
+                  {isQuickMatching ? "Searching..." : "Play Online"}
+                </Button>
+                {initialFen ? (
+                  <p className="text-xs text-[#c8c1b3]">Quick online starts from the normal chess position.</p>
+                ) : null}
+                {quickMessage ? <p className="text-xs text-[#c8c1b3]">{quickMessage}</p> : null}
+              </div>
+            }
+          />
           <StartTile
             title="Локальная партия"
             text={`Два игрока за одной доской. Текущий контроль времени: ${timeControl.label}.`}

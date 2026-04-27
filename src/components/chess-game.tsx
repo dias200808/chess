@@ -370,7 +370,8 @@ export function ChessGame({
     ...(settings.legalMoves ? targets : []).map((target) => [
       target,
       {
-        background: "radial-gradient(circle, rgba(31, 122, 77, 0.46) 24%, transparent 27%)",
+        background:
+          "radial-gradient(circle, rgba(14, 165, 233, 0.92) 16%, rgba(255, 255, 255, 0.9) 18%, transparent 23%)",
       },
     ]),
   ]);

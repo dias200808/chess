@@ -91,6 +91,12 @@ alter table public.games add column if not exists rating_type text;
 alter table public.games add column if not exists rating_before integer;
 alter table public.games add column if not exists rating_after integer;
 alter table public.games add column if not exists rating_change integer;
+alter table public.rooms add column if not exists time_control text default '10-0';
+alter table public.rooms add column if not exists match_type text not null default 'invite';
+alter table public.rooms add column if not exists host_key text;
+alter table public.rooms add column if not exists guest_key text;
+alter table public.rooms add column if not exists host_rating integer;
+alter table public.rooms add column if not exists guest_rating integer;
 alter table public.profiles add column if not exists country text default 'Unknown';
 alter table public.profiles add column if not exists bullet_rating integer not null default 1200;
 alter table public.profiles add column if not exists blitz_rating integer not null default 1200;
@@ -142,6 +148,21 @@ create policy "Room owner can create rooms"
 create policy "Room players can update rooms"
   on public.rooms for update
   using (auth.uid() = white_user_id or auth.uid() = black_user_id);
+
+drop policy if exists "Anyone can read rooms" on public.rooms;
+create policy "Anyone can read rooms"
+  on public.rooms for select using (true);
+
+drop policy if exists "Anyone can create guest rooms" on public.rooms;
+create policy "Anyone can create guest rooms"
+  on public.rooms for insert
+  with check (white_user_id is null and black_user_id is null);
+
+drop policy if exists "Anyone can update guest rooms" on public.rooms;
+create policy "Anyone can update guest rooms"
+  on public.rooms for update
+  using (white_user_id is null and black_user_id is null)
+  with check (white_user_id is null and black_user_id is null);
 
 create policy "Users can manage own puzzle progress"
   on public.puzzle_progress for all using (auth.uid() = user_id);
