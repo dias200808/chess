@@ -148,7 +148,13 @@ export function getStockfishBestMove(
   }
 
   return new Promise((resolve) => {
-    const worker = new Worker(ENGINE_PATH);
+    let worker: Worker;
+    try {
+      worker = new Worker(ENGINE_PATH);
+    } catch {
+      resolve(null);
+      return;
+    }
     const timeout = window.setTimeout(() => {
       worker.terminate();
       resolve(null);

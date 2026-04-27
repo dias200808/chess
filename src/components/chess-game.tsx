@@ -112,6 +112,15 @@ function isLowClock(ms?: number) {
   return ms <= 10_000;
 }
 
+function isMobileBotBrowser() {
+  if (typeof navigator === "undefined") return false;
+  const userAgent = navigator.userAgent;
+  return (
+    /iPhone|iPad|iPod|Android|Mobile/i.test(userAgent) ||
+    (navigator.maxTouchPoints > 1 && /Safari/i.test(userAgent))
+  );
+}
+
 type PendingPromotion = {
   from: string;
   to: string;
@@ -180,6 +189,7 @@ export function ChessGame({
   const modeLabel =
     mode === "bot" ? "Игра с ботом" : mode === "friend" ? "Партия с другом" : "Локальная партия";
   const botProfile = useMemo(() => getBotProfile(difficulty), [difficulty]);
+  const isMobileBotDevice = useMemo(() => isMobileBotBrowser(), []);
 
   const result: { result: SavedGame["result"]; winner: SavedGame["winner"]; label: string } = agreedDraw
     ? {
@@ -246,17 +256,27 @@ export function ChessGame({
       async function playBotMove() {
         let botMove = null;
 
-        if (botProfile.useStockfish) {
-          const result = await getStockfishBestMove(chess.fen(), {
-            depth: botProfile.stockfishDepth,
-            moveTime: botProfile.stockfishMoveTime,
-            elo: botProfile.id === "stockfish" ? undefined : botProfile.elo,
-            timeout: Math.max((botProfile.stockfishMoveTime ?? 1200) + 5000, 9000),
-          });
-          botMove = result?.bestMove ? findMoveFromUci(chess, result.bestMove) ?? null : null;
+        try {
+          if (botProfile.useStockfish && !isMobileBotDevice) {
+            const result = await getStockfishBestMove(chess.fen(), {
+              depth: botProfile.stockfishDepth,
+              moveTime: botProfile.stockfishMoveTime,
+              elo: botProfile.id === "stockfish" ? undefined : botProfile.elo,
+              timeout: Math.max((botProfile.stockfishMoveTime ?? 1200) + 5000, 9000),
+            });
+            botMove = result?.bestMove ? findMoveFromUci(chess, result.bestMove) ?? null : null;
+          }
+        } catch {
+          botMove = null;
         }
 
-        botMove ??= chooseBotMove(chess.fen(), difficulty);
+        const fallbackDifficulty: BotDifficulty =
+          isMobileBotDevice && botProfile.elo > 800
+            ? "elo-800"
+            : botProfile.useStockfish
+              ? "elo-1600"
+              : difficulty;
+        botMove ??= chooseBotMove(chess.fen(), fallbackDifficulty);
         if (!botMove || cancelled) return;
 
         setMoves((current) => [...current, botMove.san]);
@@ -282,7 +302,7 @@ export function ChessGame({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [botProfile, chess, difficulty, isBotTurn, timeControl.incrementSeconds, timeControlActive]);
+  }, [botProfile, chess, difficulty, isBotTurn, isMobileBotDevice, timeControl.incrementSeconds, timeControlActive]);
 
   useEffect(() => {
     if (mode !== "bot" || !drawOfferedBy || isGameOver) return;
