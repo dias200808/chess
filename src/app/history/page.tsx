@@ -20,6 +20,9 @@ function opponentName(game: SavedGame, userId?: string) {
 }
 
 function ratingDelta(game: SavedGame) {
+  if (typeof game.whiteRatingChange === "number" || typeof game.blackRatingChange === "number") {
+    return `${game.whiteRatingChange ?? 0}/${game.blackRatingChange ?? 0}`;
+  }
   if (typeof game.ratingChange === "number") {
     if (game.ratingChange > 0) return `+${game.ratingChange}`;
     return String(game.ratingChange);
@@ -105,6 +108,7 @@ export default function HistoryPage() {
             <option value="local">Local</option>
             <option value="bot">Bot</option>
             <option value="friend">Friend</option>
+            <option value="online">Online</option>
           </SelectField>
           <SelectField label="By time control" value={timeFilter} onChange={(event) => setTimeFilter(event.target.value)}>
             <option value={ANY}>All controls</option>
@@ -143,7 +147,7 @@ export default function HistoryPage() {
                   <td>{game.moves.length}</td>
                   <td>
                     <Badge>
-                      {game.rated ? `${ratingDelta(game)} ${game.ratingType ? ratingTypeLabels[game.ratingType] : ""}` : "casual"}
+                      {game.rated ? `${ratingDelta(game)} ${game.ratingType ? ratingTypeLabels[game.ratingType] : ""}` : game.gameType ?? "casual"}
                     </Badge>
                   </td>
                   <td>{game.endReason ?? "Unknown"}</td>

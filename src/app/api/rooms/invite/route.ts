@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getTimeControlPreset, isGuestOnlineTimeControl, START_FEN } from "@/lib/game-config";
-import { roomClockPatch, roomReadyLifecyclePatch } from "@/lib/online-room-rules";
+import { roomClockPatch } from "@/lib/online-room-rules";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { mapRoom } from "@/lib/supabase-data";
 import type { OnlineGameType, PlayerKind } from "@/lib/types";
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
   const supabase = getSupabaseServerClient();
   if (!supabase) {
     return NextResponse.json(
-      { error: "Quick online needs NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY." },
+      { error: "Invite rooms need NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY." },
       { status: 500 },
     );
   }
@@ -52,67 +52,14 @@ export async function POST(request: Request) {
   }
 
   if (timeControl.initialSeconds === null) {
-    return NextResponse.json({ error: "Online matchmaking requires a timed control." }, { status: 400 });
+    return NextResponse.json({ error: "Online invite games require a timed control." }, { status: 400 });
   }
 
   if (playerType === "guest" && !isGuestOnlineTimeControl(timeControl.id)) {
     return NextResponse.json(
-      { error: "Guest quick play supports only 3+0, 5+0, and 10+0." },
+      { error: "Guest invite games support only 3+0, 5+0, and 10+0." },
       { status: 400 },
     );
-  }
-
-  const { data: waitingRooms, error: findError } = await supabase
-    .from("rooms")
-    .select("*")
-    .eq("match_type", "quick")
-    .eq("status", "waiting")
-    .eq("time_control", timeControl.id)
-    .eq("game_type", gameType)
-    .neq("host_key", playerKey)
-    .order("created_at", { ascending: true })
-    .limit(25);
-
-  if (findError) return NextResponse.json({ error: findError.message }, { status: 500 });
-
-  const waitingRoom =
-    (waitingRooms ?? [])
-      .filter((room) => {
-        if (gameType !== "rated" || rating === null) return true;
-        if (room.white_rating === null || room.white_rating === undefined) return true;
-        return Math.abs(Number(room.white_rating) - rating) <= 300;
-      })
-      .sort((left, right) => {
-        if (playerType === "guest") {
-          const leftScore = left.white_player_type === "guest" ? 0 : 1;
-          const rightScore = right.white_player_type === "guest" ? 0 : 1;
-          if (leftScore !== rightScore) return leftScore - rightScore;
-        }
-        return Date.parse(String(left.created_at)) - Date.parse(String(right.created_at));
-      })[0] ?? null;
-
-  if (waitingRoom) {
-    const nowMs = Date.now();
-    const { data: joinedRoom, error: joinError } = await supabase
-      .from("rooms")
-      .update({
-        black_user_id: playerType === "account" ? body.userId : null,
-        black_player: username,
-        black_player_type: playerType,
-        black_rating: rating,
-        guest_key: playerKey,
-        guest_rating: rating,
-        ...roomReadyLifecyclePatch(timeControl.id, nowMs),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", waitingRoom.id)
-      .eq("status", "waiting")
-      .neq("host_key", playerKey)
-      .select("*")
-      .maybeSingle();
-
-    if (joinError) return NextResponse.json({ error: joinError.message }, { status: 500 });
-    if (joinedRoom) return NextResponse.json({ room: mapRoom(joinedRoom), side: "black" });
   }
 
   const { data: createdRoom, error: createError } = await supabase
@@ -131,7 +78,7 @@ export async function POST(request: Request) {
       status: "waiting",
       result: "*",
       time_control: timeControl.id,
-      match_type: "quick",
+      match_type: "invite",
       game_type: gameType,
       host_key: playerKey,
       host_rating: rating,

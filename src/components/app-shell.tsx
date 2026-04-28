@@ -22,31 +22,32 @@ import {
   X,
 } from "lucide-react";
 import { useState } from "react";
-import { cn } from "@/lib/utils";
 import { backgroundClass } from "@/lib/board-visuals";
 import { getSettings } from "@/lib/storage";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth-provider";
 import { useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui";
 
 const navSections = [
   {
-    title: "Игра",
+    title: "Game",
     items: [
-      { href: "/play", label: "Играть", icon: Swords },
-      { href: "/bot", label: "Боты", icon: Bot },
-      { href: "/friend", label: "Друг", icon: Users },
-      { href: "/puzzles", label: "Задачи", icon: Brain },
+      { href: "/play", label: "Play", icon: Swords },
+      { href: "/bot", label: "Bots", icon: Bot },
+      { href: "/friend", label: "Friend", icon: Users },
+      { href: "/puzzles", label: "Puzzles", icon: Brain },
+      { href: "/classroom", label: "Classroom", icon: GraduationCap },
     ],
   },
   {
-    title: "Разбор",
+    title: "Review",
     items: [
-      { href: "/history", label: "История", icon: History },
+      { href: "/history", label: "History", icon: History },
       { href: "/analysis-board", label: "Analysis Board", icon: Search },
       { href: "/board-editor", label: "Board Editor", icon: PencilRuler },
-      { href: "/leaderboard", label: "Рейтинг", icon: Trophy },
-      { href: "/learn", label: "Обучение", icon: GraduationCap },
+      { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
+      { href: "/learn", label: "Learn", icon: GraduationCap },
       { href: "/pricing", label: "Pro", icon: Crown },
     ],
   },
@@ -73,9 +74,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 href={item.href}
                 onClick={() => {
                   if (pathname === item.href && typeof window !== "undefined") {
-                    window.dispatchEvent(
-                      new CustomEvent("knightly:navigate-home", { detail: item.href }),
-                    );
+                    window.dispatchEvent(new CustomEvent("knightly:navigate-home", { detail: item.href }));
                   }
                   setOpen(false);
                 }}
@@ -103,7 +102,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         backgroundClass(shellSettings.backgroundTheme),
       )}
     >
-      <aside className={cn("hidden border-r border-white/6 bg-[#1f1d1b] lg:flex lg:min-h-screen lg:flex-col lg:px-4 lg:py-5", shellSettings.zenMode && "lg:hidden")}>
+      <aside
+        className={cn(
+          "hidden border-r border-white/6 bg-[#1f1d1b] lg:flex lg:min-h-screen lg:flex-col lg:px-4 lg:py-5",
+          shellSettings.zenMode && "lg:hidden",
+        )}
+      >
         <Link href="/" className="flex items-center gap-3 rounded-2xl px-3 py-2">
           <span className="grid h-11 w-11 place-items-center rounded-2xl bg-[#5e8a3c] text-white shadow-lg shadow-[#5e8a3c]/25">
             <Crown className="h-5 w-5" />
@@ -122,20 +126,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             className="flex h-11 items-center gap-3 rounded-2xl px-3 text-sm font-semibold text-[#d7d1c6] transition hover:bg-white/6 hover:text-white"
           >
             <Search className="h-4 w-4" />
-            <span>Поиск</span>
+            <span>Search</span>
           </button>
           <button
             type="button"
             className="flex h-11 items-center gap-3 rounded-2xl px-3 text-sm font-semibold text-[#d7d1c6] transition hover:bg-white/6 hover:text-white"
             onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
-            aria-label="Сменить тему"
+            aria-label="Toggle theme"
           >
-            {mounted && resolvedTheme === "dark" ? (
-              <Sun className="h-4 w-4" />
-            ) : (
-              <Moon className="h-4 w-4" />
-            )}
-            <span>Тема</span>
+            {mounted && resolvedTheme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            <span>Theme</span>
           </button>
           <Link
             href="/settings"
@@ -149,7 +149,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             className="flex h-12 items-center gap-3 rounded-2xl bg-[#5e8a3c] px-4 text-sm font-bold text-white transition hover:brightness-105"
           >
             <UserRound className="h-4 w-4" />
-            <span className="truncate">{user ? user.username : "Войти"}</span>
+            <span className="truncate">{user ? user.username : "Sign in"}</span>
           </Link>
         </div>
       </aside>
@@ -167,7 +167,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               className="h-10 w-10 border-white/10 bg-white/6 px-0 text-white hover:bg-white/12"
               variant="secondary"
               onClick={() => setOpen((value) => !value)}
-              aria-label="Открыть навигацию"
+              aria-label="Open navigation"
             >
               {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </Button>
@@ -181,12 +181,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   className="flex h-11 items-center gap-3 rounded-2xl bg-white/6 px-3 text-sm font-semibold text-[#e8e0d2]"
                   onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
                 >
-                  {mounted && resolvedTheme === "dark" ? (
-                    <Sun className="h-4 w-4" />
-                  ) : (
-                    <Moon className="h-4 w-4" />
-                  )}
-                  <span>Тема</span>
+                  {mounted && resolvedTheme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                  <span>Theme</span>
                 </button>
                 <Link
                   href="/settings"
@@ -200,16 +196,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   onClick={() => setOpen(false)}
                   className="inline-flex h-11 items-center justify-center rounded-2xl bg-[#5e8a3c] px-5 text-sm font-semibold text-white"
                 >
-                  {user ? "Профиль" : "Войти"}
+                  {user ? "Profile" : "Sign in"}
                 </Link>
               </div>
             </div>
           ) : null}
         </header>
 
-        <main className="min-h-screen px-3 py-3 sm:px-4 sm:py-4 lg:px-5 lg:py-5">
-          {children}
-        </main>
+        <main className="min-h-screen px-3 py-3 sm:px-4 sm:py-4 lg:px-5 lg:py-5">{children}</main>
       </div>
     </div>
   );

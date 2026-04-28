@@ -30,7 +30,8 @@ import {
   summarizeMoveTypes,
 } from "@/lib/chess-utils";
 import { getStockfishBestMove, runStockfishGameAnalysis } from "@/lib/stockfish-client";
-import { getSettings, saveGame } from "@/lib/storage";
+import { chooseOpeningBookMove } from "@/lib/bot-opening-book";
+import { getSettings, logStudentActivity, saveGame } from "@/lib/storage";
 import { saveGameToSupabase } from "@/lib/supabase-data";
 import { animationDuration, boardColors } from "@/lib/board-visuals";
 import {
@@ -127,6 +128,12 @@ type PendingPromotion = {
   side: "white" | "black";
 };
 
+type QueuedMove = {
+  from: string;
+  to: string;
+  promotion?: "q" | "r" | "b" | "n";
+};
+
 declare global {
   interface Window {
     webkitAudioContext?: typeof AudioContext;
@@ -170,6 +177,7 @@ export function ChessGame({
   const [analysisError, setAnalysisError] = useState("");
   const [isOpeningReview, setIsOpeningReview] = useState(false);
   const [pendingPromotion, setPendingPromotion] = useState<PendingPromotion | null>(null);
+  const [premove, setPremove] = useState<QueuedMove | null>(null);
   const [controlMessage, setControlMessage] = useState("");
   const [finalSaved, setFinalSaved] = useState(false);
   const [viewedPly, setViewedPly] = useState<number | null>(null);
@@ -220,6 +228,7 @@ export function ChessGame({
   const topSide = orientation === "white" ? "black" : "white";
   const bottomSide = orientation === "white" ? "white" : "black";
   const currentTurn = chess.turn();
+  const premovesEnabled = mode === "bot" ? true : settings.premoves;
 
   useEffect(() => {
     lastTickRef.current = Date.now();
@@ -252,16 +261,22 @@ export function ChessGame({
   useEffect(() => {
     if (!isBotTurn) return;
     let cancelled = false;
+    const [minDelay, maxDelay] = botProfile.thinkDelayMs;
+    const delay = minDelay + Math.floor(Math.random() * Math.max(1, maxDelay - minDelay));
     const timer = window.setTimeout(() => {
       async function playBotMove() {
         let botMove = null;
+        const history = chess.history({ verbose: true }).map((move) => `${move.from}${move.to}${move.promotion ?? ""}`);
+
+        botMove = chooseOpeningBookMove(chess.fen(), history, botProfile);
 
         try {
-          if (botProfile.useStockfish && !isMobileBotDevice) {
+          if (!botMove && botProfile.useStockfish && !isMobileBotDevice) {
             const result = await getStockfishBestMove(chess.fen(), {
               depth: botProfile.stockfishDepth,
               moveTime: botProfile.stockfishMoveTime,
               elo: botProfile.id === "stockfish" ? undefined : botProfile.elo,
+              skillLevel: botProfile.stockfishSkillLevel,
               timeout: Math.max((botProfile.stockfishMoveTime ?? 1200) + 5000, 9000),
             });
             botMove = result?.bestMove ? findMoveFromUci(chess, result.bestMove) ?? null : null;
@@ -296,7 +311,7 @@ export function ChessGame({
       }
 
       void playBotMove();
-    }, 550);
+    }, delay);
 
     return () => {
       cancelled = true;
@@ -398,23 +413,50 @@ export function ChessGame({
         ]
       : []),
     ...(selectedSquare ? [[selectedSquare, { background: "rgba(96, 197, 141, 0.55)" }]] : []),
+    ...(premove
+      ? [
+          [premove.from, { background: "rgba(96, 197, 141, 0.24)" }],
+          [premove.to, { background: "rgba(96, 197, 141, 0.28)" }],
+        ]
+      : []),
     ...(settings.legalMoves ? targets : []).map((target) => [
       target,
       targetStyle(target),
     ]),
   ]);
 
-  function canDragPiece({ piece }: { piece: { pieceType: string } }) {
-    if (isViewingHistory || isGameOver || isBotTurn || pendingPromotion) return false;
-    const currentPiecePrefix = chess.turn() === "w" ? "w" : "b";
-    if (!piece.pieceType.startsWith(currentPiecePrefix)) return false;
+  const boardArrows = premove
+    ? [{ startSquare: premove.from, endSquare: premove.to, color: "rgba(96, 197, 141, 0.92)" }]
+    : [];
+
+  function canMovePieceNow(square: string) {
+    if (isViewingHistory || isGameOver || pendingPromotion) return false;
+    const piece = chess.get(square as Square);
+    if (!piece) return false;
+    if (piece.color !== chess.turn()) return false;
     if (mode !== "bot") return true;
-    return playerColor === "white"
-      ? piece.pieceType.startsWith("w")
-      : piece.pieceType.startsWith("b");
+    return playerColor === "white" ? piece.color === "w" : piece.color === "b";
   }
 
-  function applyIncrement(side: "white" | "black") {
+  function canSetPremove(square: string) {
+    if (mode !== "bot" || !premovesEnabled || isViewingHistory || isGameOver || pendingPromotion || !isBotTurn) return false;
+    const piece = chess.get(square as Square);
+    if (!piece) return false;
+    return playerColor === "white" ? piece.color === "w" : piece.color === "b";
+  }
+
+  function canDragPiece({ piece }: { piece: { pieceType: string } }) {
+    if (isViewingHistory || isGameOver || pendingPromotion) return false;
+    const currentPiecePrefix = chess.turn() === "w" ? "w" : "b";
+    const playerPiecePrefix = playerColor === "white" ? "w" : "b";
+
+    if (mode !== "bot") return piece.pieceType.startsWith(currentPiecePrefix);
+    if (!piece.pieceType.startsWith(playerPiecePrefix)) return false;
+    if (isBotTurn) return premovesEnabled;
+    return piece.pieceType.startsWith(currentPiecePrefix);
+  }
+
+  const applyIncrement = useCallback((side: "white" | "black") => {
     if (!timeControlActive) return;
     setClockMs((current) =>
       current
@@ -424,7 +466,7 @@ export function ChessGame({
           }
         : current,
     );
-  }
+  }, [timeControl.incrementSeconds, timeControlActive]);
 
   function needsPromotion(sourceSquare: string, targetSquare: string) {
     const piece = chess.get(sourceSquare as Square);
@@ -435,15 +477,17 @@ export function ChessGame({
     );
   }
 
-  function commitMove({
+  const commitMove = useCallback(({
     sourceSquare,
     targetSquare,
     promotion = "q",
+    fromPremove = false,
   }: {
     sourceSquare: string;
     targetSquare: string;
     promotion?: "q" | "r" | "b" | "n";
-  }) {
+    fromPremove?: boolean;
+  }) => {
     const next = replay(moves, initialFen);
     const movingSide = next.turn();
 
@@ -457,12 +501,40 @@ export function ChessGame({
       applyIncrement(movingSide === "w" ? "white" : "black");
       setSelectedSquare(null);
       setPendingPromotion(null);
+      if (fromPremove) setPremove(null);
       playTone(move.isCapture() ? "capture" : "move");
       return true;
     } catch {
       return false;
     }
-  }
+  }, [applyIncrement, initialFen, moves]);
+
+  useEffect(() => {
+    if (!premove || mode !== "bot" || isViewingHistory || isGameOver || isBotTurn || pendingPromotion) return;
+    const legalTargets = squareTargets(chess.fen(), premove.from);
+    const piece = chess.get(premove.from as Square);
+    const playerSide = playerColor === "white" ? "w" : "b";
+
+    if (!piece || piece.color !== playerSide || !legalTargets.includes(premove.to as Square)) {
+      window.setTimeout(() => setPremove(null), 0);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      const moved = commitMove({
+        sourceSquare: premove.from,
+        targetSquare: premove.to,
+        promotion: premove.promotion ?? "q",
+        fromPremove: true,
+      });
+
+      if (moved) {
+        setControlMessage(`Premove played: ${premove.from} → ${premove.to}.`);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [chess, commitMove, isBotTurn, isGameOver, isViewingHistory, mode, pendingPromotion, playerColor, premove]);
 
   function onDrop({
     sourceSquare,
@@ -471,8 +543,26 @@ export function ChessGame({
     sourceSquare: string;
     targetSquare: string | null;
   }) {
-    if (!targetSquare || isGameOver || isBotTurn || pendingPromotion) return false;
+    if (!targetSquare || isGameOver || pendingPromotion) return false;
     if (isViewingHistory) return false;
+
+    if (!squareTargets(chess.fen(), sourceSquare).includes(targetSquare as Square)) {
+      return false;
+    }
+
+    if (canSetPremove(sourceSquare)) {
+      setPremove({
+        from: sourceSquare,
+        to: targetSquare,
+        promotion: needsPromotion(sourceSquare, targetSquare) ? "q" : undefined,
+      });
+      setSelectedSquare(null);
+      setPendingPromotion(null);
+      setControlMessage(`Premove set: ${sourceSquare} → ${targetSquare}.`);
+      return true;
+    }
+
+    if (!canMovePieceNow(sourceSquare)) return false;
 
     if (needsPromotion(sourceSquare, targetSquare)) {
       setPendingPromotion({
@@ -488,7 +578,7 @@ export function ChessGame({
 
   function onSquareClick({ square }: { square: string }) {
     if (isViewingHistory) return;
-    if (isGameOver || isBotTurn || pendingPromotion) return;
+    if (isGameOver || pendingPromotion) return;
     const piece = chess.get(square as Square);
 
     if (selectedSquare && targets.includes(square as Square)) {
@@ -501,12 +591,9 @@ export function ChessGame({
       return;
     }
 
-    const isPlayerPiece =
-      mode !== "bot" ||
-      (playerColor === "white" ? piece.color === "w" : piece.color === "b");
-
-    if (piece.color === chess.turn() && isPlayerPiece) {
+    if (canMovePieceNow(square) || canSetPremove(square)) {
       setSelectedSquare(square);
+      setControlMessage(canSetPremove(square) ? "Set your premove target." : "");
     }
   }
 
@@ -522,6 +609,7 @@ export function ChessGame({
     setAnalysisProgress(null);
     setAnalysisError("");
     setPendingPromotion(null);
+    setPremove(null);
     setControlMessage("");
     setFinalSaved(false);
     setViewedPly(null);
@@ -669,6 +757,19 @@ export function ChessGame({
     if (!silent) setControlMessage("Партия сохранена.");
 
     if (shouldRecordProfile) {
+      logStudentActivity({
+        userId: user.id,
+        type: "played_game",
+        title: `Played ${mode} game`,
+        relatedId: id,
+        details: `${result.result} vs ${game.opponent}`,
+        metadata: {
+          moves: moves.length,
+          accuracy: playerColor === "white" ? analysis.whiteAccuracy : analysis.blackAccuracy,
+          timeControl: timeControl.label,
+          rated: savedRated,
+        },
+      });
       await updateProfile({
         gamesCount: user.gamesCount + 1,
         wins: user.wins + (userWon ? 1 : 0),
@@ -688,7 +789,16 @@ export function ChessGame({
     setIsOpeningReview(true);
     try {
       const id = await persistGame();
-      router.push(`/analysis?id=${id}`);
+      if (user) {
+        logStudentActivity({
+          userId: user.id,
+          type: "analyzed_game",
+          title: "Opened game review",
+          relatedId: id,
+          details: `Stockfish review for ${mode} game`,
+        });
+      }
+      router.push(`/analysis?id=${id}&autostart=1`);
     } finally {
       setIsOpeningReview(false);
     }
@@ -834,7 +944,7 @@ export function ChessGame({
           </div>
         </div>
 
-        <div className="mx-auto grid max-w-[min(82vh,720px)] gap-3">
+        <div className="mx-auto grid w-full max-w-[min(100%,82vh,720px)] gap-3">
           <div
             className={`flex items-center justify-between rounded-2xl px-4 py-3 ${clockPanelClass(topSide)}`}
           >
@@ -859,10 +969,18 @@ export function ChessGame({
                 boardOrientation: orientation,
                 onPieceDrop: onDrop,
                 onSquareClick,
+                onSquareRightClick: () => {
+                  setPremove(null);
+                  setSelectedSquare(null);
+                },
                 canDragPiece,
                 onMouseOverSquare: ({ square }) => setHoverSquare(square),
                 onMouseOutSquare: () => setHoverSquare(null),
                 squareStyles,
+                arrows: boardArrows,
+                allowDrawingArrows: false,
+                allowAutoScroll: false,
+                dragActivationDistance: 8,
                 showNotation: settings.boardCoordinates,
                 showAnimations: settings.animationSpeed > 0,
                 animationDurationInMs: animationDuration(settings),
@@ -870,6 +988,7 @@ export function ChessGame({
                   borderRadius: "1.5rem",
                   boxShadow: "0 24px 80px rgba(0,0,0,0.22)",
                   overflow: "hidden",
+                  touchAction: "none",
                 },
                 lightSquareStyle: { backgroundColor: colors.light },
                 darkSquareStyle: { backgroundColor: colors.dark },
@@ -941,7 +1060,7 @@ export function ChessGame({
                     </div>
                   ) : hasDeepAnalysis ? (
                     <>
-                      <div className="mt-4 grid grid-cols-3 gap-2">
+                      <div className="mt-4 grid gap-2 sm:grid-cols-3">
                         {postGameStats.map((item) => (
                           <div key={item.label} className="rounded-xl bg-muted p-3 text-center">
                             <p className="text-xs font-semibold text-muted-foreground">{item.label}</p>
@@ -963,7 +1082,7 @@ export function ChessGame({
                     </div>
                   )}
 
-                  <div className="mt-4 grid grid-cols-2 gap-2">
+                  <div className="mt-4 grid gap-2 sm:grid-cols-2">
                     <Button variant="secondary" onClick={newGame}>
                       <RotateCcw className="mr-2 h-4 w-4" />
                       Новая
@@ -1074,7 +1193,7 @@ export function ChessGame({
               <span className="font-semibold">+{timeControl.incrementSeconds} сек</span>
             </div>
           </div>
-          <div className="mt-5 grid grid-cols-2 gap-2">
+          <div className="mt-5 grid gap-2 sm:grid-cols-2">
             <Button variant="secondary" onClick={newGame}>
               <RotateCcw className="mr-2 h-4 w-4" />
               New Game
@@ -1095,6 +1214,12 @@ export function ChessGame({
               <Handshake className="mr-2 h-4 w-4" />
               Offer Draw
             </Button>
+            {premove ? (
+              <Button variant="secondary" onClick={() => setPremove(null)}>
+                <X className="mr-2 h-4 w-4" />
+                Cancel Premove
+              </Button>
+            ) : null}
             <Button variant="secondary" onClick={acceptDraw} disabled={!canRespondToDraw}>
               <Check className="mr-2 h-4 w-4" />
               Accept Draw
@@ -1131,6 +1256,11 @@ export function ChessGame({
               Draw offered by {drawOfferedBy === "white" ? "White" : "Black"}.
             </p>
           ) : null}
+          {premove ? (
+            <p className="mt-3 rounded-2xl bg-muted p-3 text-sm font-semibold">
+              Premove queued: {premove.from} → {premove.to}
+            </p>
+          ) : null}
           {controlMessage ? (
             <p className="mt-3 rounded-2xl bg-muted p-3 text-sm text-muted-foreground">
               {controlMessage}
@@ -1163,7 +1293,7 @@ export function ChessGame({
           </div>
           {hasDeepAnalysis ? (
             <>
-              <div className="mt-4 grid grid-cols-2 gap-3">
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl bg-muted p-4">
                   <p className="text-sm text-muted-foreground">Точность белых</p>
                   <p className="font-mono text-3xl font-black">{activeAnalysis.whiteAccuracy}%</p>
@@ -1174,7 +1304,7 @@ export function ChessGame({
                 </div>
               </div>
 
-              <div className="mt-4 grid grid-cols-2 gap-2">
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
                 {reviewCounts.map((item) => (
                   <div key={item.type} className="rounded-2xl bg-muted px-3 py-3">
                     <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">

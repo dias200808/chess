@@ -17,14 +17,13 @@ Knightly is a Chess.com-style MVP built with Next.js, TypeScript, Tailwind CSS, 
 - Puzzle validation script that blocks impossible starting positions and king-capture solutions
 - Learning section, leaderboard, settings, and Pro/Pricing page
 - Supabase-ready client helper and SQL schema in `supabase/schema.sql`
-- Supabase Auth/data paths for profiles, games, puzzle progress, and Realtime friend rooms with local fallback
+- Supabase Auth/data paths for profiles, games, puzzle progress, server-authoritative online rooms, and Realtime room updates
 - Stockfish analysis with engine line details and an evaluation graph
 - Puzzle leaderboard and per-category stats
 
 ## Not Completed Yet
 
-- Real Supabase Auth wiring in the UI
-- A live Supabase project must still be created and configured with `.env.local`
+- A live Supabase project must still be created and configured with `.env.local` or Vercel environment variables
 - Stripe payments
 - Production deployment URL and GitHub remote require your GitHub/Vercel accounts
 
@@ -42,8 +41,10 @@ Open `http://localhost:3000`.
 1. Create a Supabase project.
 2. Run `supabase/schema.sql` in the Supabase SQL editor.
 3. Copy `.env.example` to `.env.local`.
-4. Fill in `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
-5. Replace the local-storage auth/persistence adapters with Supabase calls when moving from MVP demo mode to production mode.
+4. Fill in `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`.
+5. In Vercel, add the same three variables in Project Settings -> Environment Variables.
+
+`SUPABASE_SERVICE_ROLE_KEY` must stay server-only. Do not prefix it with `NEXT_PUBLIC_`.
 
 ## Deployment
 
@@ -72,4 +73,5 @@ Then import the GitHub repo in Vercel and set:
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
 ```

@@ -20,8 +20,8 @@ import {
 } from "lucide-react";
 import { Chessboard } from "@/components/client-chessboard";
 import { Badge, Button, Card, Field, SelectField } from "@/components/ui";
-import { puzzles as rawPuzzles } from "@/lib/data";
-import { getPuzzleState, getSettings, setPuzzleState } from "@/lib/storage";
+import { dailyPuzzleForDate, puzzleLibrary, puzzleSourceSummary } from "@/lib/puzzle-library";
+import { getPuzzleState, getSettings, logStudentActivity, setPuzzleState } from "@/lib/storage";
 import {
   fetchPuzzleProgressFromSupabase,
   upsertPuzzleProgressToSupabase,
@@ -40,7 +40,7 @@ type PuzzleView =
   | "themes"
   | "stats"
   | "mistakes";
-type DifficultyMode = "adaptive" | "easy" | "medium" | "hard" | "custom";
+type DifficultyMode = "adaptive" | "easy" | "medium" | "hard" | "expert" | "custom";
 type Feedback = "idle" | "correct" | "incorrect" | "solved" | "failed";
 type PromotionPiece = "q" | "r" | "b" | "n";
 type PendingPromotion = {
@@ -57,7 +57,7 @@ const SPECIAL_SURVIVAL_KEY = "__survival__";
 const SPECIAL_BATTLE_KEY = "__battle__";
 const SPECIAL_DAILY_KEY = "__daily__";
 const MAX_STRIKES = 3;
-const MIN_TRAINING_PUZZLE_RATING = 1200;
+const MIN_TRAINING_PUZZLE_RATING = 800;
 const BLOCKED_PUZZLE_IDS = new Set([
   "rated-clearance-1520",
   "rated-knight-fork-1850",
@@ -67,14 +67,17 @@ const BLOCKED_PUZZLE_IDS = new Set([
 const themeLabels: Record<string, string> = {
   "mate in 1": "Mate in 1",
   "mate in 2": "Mate in 2",
+  "mate in 3": "Mate in 3",
   fork: "Fork",
   pin: "Pin",
   skewer: "Skewer",
   "discovered attack": "Discovered Attack",
   "double attack": "Double Attack",
+  "back rank mate": "Back Rank Mate",
   "hanging piece": "Hanging Piece",
   sacrifice: "Sacrifice",
   defense: "Defense",
+  "opening trap": "Opening Trap",
   promotion: "Promotion",
   deflection: "Deflection",
   clearance: "Clearance",
@@ -134,7 +137,14 @@ function isPlayablePuzzle(puzzle: Puzzle) {
   }
 }
 
-const puzzles = rawPuzzles.filter(isPlayablePuzzle);
+const puzzles = puzzleLibrary.filter(isPlayablePuzzle);
+const featuredPuzzles = puzzles.filter((puzzle) => {
+  const lineLength = puzzle.line?.length ?? 1;
+  if (puzzleSourceSummary.lichessCount > 0 && puzzle.externalId) return true;
+  if (puzzle.category === "mate in 1") return false;
+  if (lineLength < 2) return false;
+  return puzzle.rating >= 1000;
+});
 
 function timestamp() {
   return Date.now();
@@ -191,16 +201,19 @@ function ratingDelta(playerRating: number, puzzleRating: number, correct: boolea
 }
 
 function rangeForDifficulty(mode: DifficultyMode, customMin: number, customMax: number) {
-  if (mode === "easy") return [MIN_TRAINING_PUZZLE_RATING, 1500];
-  if (mode === "medium") return [1500, 1900];
-  if (mode === "hard") return [1800, 2800];
-  if (mode === "custom") return [Math.max(MIN_TRAINING_PUZZLE_RATING, customMin), customMax];
+  if (mode === "easy") return [800, 1200];
+  if (mode === "medium") return [1200, 1600];
+  if (mode === "hard") return [1600, 2000];
+  if (mode === "expert") return [2000, 3200];
+  if (mode === "custom") return [Math.max(MIN_TRAINING_PUZZLE_RATING, customMin), Math.max(customMin, customMax)];
   return null;
 }
 
 function dailyPuzzle() {
-  const dayIndex = Math.floor(Date.now() / 86_400_000);
-  return puzzles[dayIndex % puzzles.length] ?? puzzles[0];
+  const preferredPool = featuredPuzzles.length ? featuredPuzzles : puzzles;
+  const selected = dailyPuzzleForDate();
+  if (selected && preferredPool.some((puzzle) => puzzle.id === selected.id)) return selected;
+  return preferredPool[0] ?? puzzles[0];
 }
 
 function randomIndex(max: number) {
@@ -221,13 +234,18 @@ function puzzleLineLength(puzzle: Puzzle) {
   return Math.ceil((puzzle.line?.length ?? 1) / 2);
 }
 
+function shouldUseFeaturedPool(nextView: PuzzleView, nextTheme: string) {
+  if (nextTheme !== "mixed") return false;
+  return nextView === "rated" || nextView === "learning" || nextView === "rush" || nextView === "battle" || nextView === "daily";
+}
+
 export default function PuzzlesPage() {
-  const { user } = useAuth();
+  const { user, updateProfile } = useAuth();
   const [solved, setSolved] = useState(() => getPuzzleState());
   const [view, setView] = useState<PuzzleView>("home");
   const [theme, setTheme] = useState("mixed");
   const [difficultyMode, setDifficultyMode] = useState<DifficultyMode>("adaptive");
-  const [customMin, setCustomMin] = useState(1200);
+  const [customMin, setCustomMin] = useState(800);
   const [customMax, setCustomMax] = useState(2000);
   const [rushSeconds, setRushSeconds] = useState(180);
   const [timeLeft, setTimeLeft] = useState(180);
@@ -254,7 +272,7 @@ export default function PuzzlesPage() {
   const [puzzleStartedAt, setPuzzleStartedAt] = useState(0);
 
   const categories = useMemo(
-    () => ["mixed", ...Array.from(new Set(puzzles.map((puzzle) => puzzle.category)))],
+    () => ["mixed", ...Array.from(new Set(puzzles.flatMap((puzzle) => puzzle.themes?.length ? puzzle.themes : [puzzle.category])))],
     [],
   );
   const metaProgress = normalizeProgress(solved[SPECIAL_META_KEY]);
@@ -301,9 +319,10 @@ export default function PuzzlesPage() {
       difficultyMode === "adaptive"
         ? Math.max(STARTING_PUZZLE_RATING, playerPuzzleRating + (view === "rush" || view === "survival" ? runScore * 25 : 100))
         : null;
+    const basePool = shouldUseFeaturedPool(view, theme) && featuredPuzzles.length ? featuredPuzzles : puzzles;
 
-    const list = puzzles
-      .filter((puzzle) => theme === "mixed" || puzzle.category === theme)
+    const list = basePool
+      .filter((puzzle) => theme === "mixed" || (puzzle.themes?.length ? puzzle.themes.includes(theme as Puzzle["category"]) : puzzle.category === theme))
       .filter((puzzle) => !range || (puzzle.rating >= range[0] && puzzle.rating <= range[1]))
       .sort((a, b) => {
         if (targetRating) {
@@ -345,7 +364,9 @@ export default function PuzzlesPage() {
   const themeStats = categories
     .filter((item) => item !== "mixed")
     .map((item) => {
-      const themePuzzles = puzzles.filter((puzzle) => puzzle.category === item);
+      const themePuzzles = puzzles.filter((puzzle) =>
+        puzzle.themes?.length ? puzzle.themes.includes(item as Puzzle["category"]) : puzzle.category === item,
+      );
       const progress = themePuzzles.map((puzzle) => normalizeProgress(solved[puzzle.id]));
       const themeAttempts = progress.reduce((sum, itemProgress) => sum + itemProgress.attempts, 0);
       const themeSolved = progress.filter((itemProgress) => itemProgress.solved).length;
@@ -358,7 +379,7 @@ export default function PuzzlesPage() {
       };
     });
   const weakestThemes = [...themeStats]
-    .filter((item) => item.total > 0)
+      .filter((item) => item.total > 0)
     .sort((a, b) => a.accuracy - b.accuracy || b.total - a.total)
     .slice(0, 3);
   const strongestThemes = [...themeStats]
@@ -371,7 +392,7 @@ export default function PuzzlesPage() {
     void fetchPuzzleProgressFromSupabase(user.id).then((remoteProgress) => {
       if (!remoteProgress) return;
       setSolved((current) => ({ ...current, ...remoteProgress }));
-      setPuzzleState({ ...getPuzzleState(), ...remoteProgress });
+      setPuzzleState({ ...getPuzzleState(user.id), ...remoteProgress }, user.id);
     });
   }, [user]);
 
@@ -390,7 +411,7 @@ export default function PuzzlesPage() {
 
   function persist(next: Record<string, PuzzleProgress>) {
     setSolved(next);
-    setPuzzleState(next);
+    setPuzzleState(next, user?.id);
     if (user) {
       for (const [puzzleId, progress] of Object.entries(next)) {
         void upsertPuzzleProgressToSupabase(user.id, puzzleId, progress).catch(() => {});
@@ -422,12 +443,13 @@ export default function PuzzlesPage() {
   }
 
   function selectNextPuzzle(source = filteredPuzzles) {
-    const list = view === "mistakes" && mistakePuzzles.length ? mistakePuzzles : source.length ? source : puzzles;
+    const fallbackPool = shouldUseFeaturedPool(view, theme) && featuredPuzzles.length ? featuredPuzzles : puzzles;
+    const list = view === "mistakes" && mistakePuzzles.length ? mistakePuzzles : source.length ? source : fallbackPool;
     const fresh = list.filter(
       (item) => item.id !== currentPuzzleId && !recentPuzzleIds.includes(item.id),
     );
     const candidates = fresh.length ? fresh : list.filter((item) => item.id !== currentPuzzleId);
-    return randomPuzzle(candidates, randomPuzzle(list, puzzles[0]));
+    return randomPuzzle(candidates, randomPuzzle(list, fallbackPool[0] ?? puzzles[0]));
   }
 
   function openPuzzle(puzzle: Puzzle) {
@@ -467,12 +489,16 @@ export default function PuzzlesPage() {
       setTimeLeft(rushSeconds);
     }
 
+    const modePool = shouldUseFeaturedPool(nextView, nextTheme) && featuredPuzzles.length ? featuredPuzzles : puzzles;
     const source =
       nextView === "daily"
         ? [dailyPuzzle()]
         : nextView === "mistakes" && mistakePuzzles.length
           ? mistakePuzzles
-          : puzzles.filter((puzzle) => nextTheme === "mixed" || puzzle.category === nextTheme);
+          : modePool.filter((puzzle) =>
+              nextTheme === "mixed" ||
+              (puzzle.themes?.length ? puzzle.themes.includes(nextTheme as Puzzle["category"]) : puzzle.category === nextTheme),
+            );
     openPuzzle(randomPuzzle(source, puzzles[0]));
     setMessage(
       nextView === "rated"
@@ -569,6 +595,21 @@ export default function PuzzlesPage() {
     const nextState = rating?.nextState ?? { ...solved, [currentPuzzle.id]: baseProgress };
 
     persist(nextState);
+    if (user) {
+      logStudentActivity({
+        userId: user.id,
+        type: "failed_puzzle",
+        title: `Failed puzzle: ${currentPuzzle.title}`,
+        relatedId: currentPuzzle.id,
+        details: `${currentPuzzle.category} / ${currentPuzzle.rating}`,
+        metadata: {
+          theme: currentPuzzle.category,
+          rating: currentPuzzle.rating,
+          attempts: baseProgress.attempts,
+          timeSpentMs: solvingTimeMs,
+        },
+      });
+    }
     setWrongSquares([source, target]);
     setAnswerSquares([]);
     setFeedback("incorrect");
@@ -637,6 +678,26 @@ export default function PuzzlesPage() {
     }
 
     persist(nextState);
+    if (user && rating?.nextRating && rating?.nextRating !== user.puzzleRating) {
+      void updateProfile({ puzzleRating: rating.nextRating });
+    }
+    if (user) {
+      logStudentActivity({
+        userId: user.id,
+        type: solutionWasShown ? "failed_puzzle" : "solved_puzzle",
+        title: `${solutionWasShown ? "Reviewed" : "Solved"} puzzle: ${currentPuzzle.title}`,
+        relatedId: currentPuzzle.id,
+        details: `${currentPuzzle.category} / ${currentPuzzle.rating}`,
+        metadata: {
+          theme: currentPuzzle.category,
+          rating: currentPuzzle.rating,
+          solvingTimeMs,
+          usedHint: hintLevel > 0,
+          usedSolution: solutionWasShown,
+          ratingChange: rating?.change ?? 0,
+        },
+      });
+    }
     setFeedback(solutionWasShown ? "failed" : "solved");
     setStreak(solutionWasShown ? 0 : nextStreak);
     setRunScore((currentScore) => currentScore + (solutionWasShown ? 0 : puzzleScore));
@@ -869,6 +930,12 @@ export default function PuzzlesPage() {
           <div>
             <Badge>Puzzle rating {playerPuzzleRating}</Badge>
             <h1 className="mt-3 text-3xl font-black">Puzzles</h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Library: {puzzleSourceSummary.totalCount} puzzles
+              {puzzleSourceSummary.lichessCount
+                ? `, including ${puzzleSourceSummary.lichessCount} imported Lichess positions`
+                : ", ready for Lichess import"}
+            </p>
           </div>
           <div className="grid w-full gap-3 sm:w-auto sm:grid-cols-2">
             <SelectField label="Rush time" value={rushSeconds} onChange={(event) => setRushSeconds(Number(event.target.value))}>
@@ -877,9 +944,10 @@ export default function PuzzlesPage() {
             </SelectField>
             <SelectField label="Difficulty" value={difficultyMode} onChange={(event) => setDifficultyMode(event.target.value as DifficultyMode)}>
               <option value="adaptive">Adaptive</option>
-              <option value="easy">Easy 1200-1500</option>
-              <option value="medium">Medium 1500-1900</option>
-              <option value="hard">Hard 1800+</option>
+              <option value="easy">Easy 800-1200</option>
+              <option value="medium">Medium 1200-1600</option>
+              <option value="hard">Hard 1600-2000</option>
+              <option value="expert">Expert 2000+</option>
               <option value="custom">Custom range</option>
             </SelectField>
           </div>
@@ -1026,9 +1094,13 @@ export default function PuzzlesPage() {
               <Badge>{view === "mistakes" ? "Mistakes Review" : view}</Badge>
               <Badge>{themeLabels[currentPuzzle.category] ?? currentPuzzle.category}</Badge>
               <Badge>{currentPuzzle.rating} rated</Badge>
+              {currentPuzzle.difficulty ? <Badge>{currentPuzzle.difficulty}</Badge> : null}
               <Badge>{puzzleLineLength(currentPuzzle)} move line</Badge>
             </div>
             <h1 className="mt-2 text-3xl font-black">{currentPuzzle.title}</h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {currentPuzzle.opening ?? "Tactical pattern"} - {currentPuzzle.sourceGame ?? "Training source"}
+            </p>
           </div>
           <Button variant="secondary" onClick={() => setView("home")}>Modes</Button>
         </div>
@@ -1108,6 +1180,34 @@ export default function PuzzlesPage() {
             <Badge>{currentPuzzle.sideToMove === "white" ? "White to move" : "Black to move"}</Badge>
           </div>
           <p className="mt-3 rounded-xl bg-muted p-4 text-sm leading-6">{message}</p>
+          <div className="mt-4 grid gap-2 rounded-xl bg-muted p-4 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">Themes</span>
+              <span className="text-right font-semibold">
+                {(currentPuzzle.themes?.length ? currentPuzzle.themes : [currentPuzzle.category])
+                  .map((item) => themeLabels[item] ?? item)
+                  .join(", ")}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">Opening</span>
+              <span className="text-right font-semibold">{currentPuzzle.opening ?? "General tactic"}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">Popularity</span>
+              <span className="font-semibold">{currentPuzzle.popularity ?? "--"}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">Plays</span>
+              <span className="font-semibold">{currentPuzzle.playsCount ?? "--"}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">Win rate</span>
+              <span className="font-semibold">
+                {typeof currentPuzzle.winPercentage === "number" ? `${currentPuzzle.winPercentage}%` : "--"}
+              </span>
+            </div>
+          </div>
           <div className="mt-4 grid grid-cols-2 gap-2">
             {view === "rush" || view === "battle" || view === "survival" ? (
               <Button onClick={() => startMode(view, { seconds: view === "rush" ? rushSeconds : 180 })}>

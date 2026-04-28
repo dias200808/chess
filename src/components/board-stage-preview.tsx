@@ -6,12 +6,14 @@ import { Badge } from "@/components/ui";
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 function initials(value: string) {
-  return value
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("") || "?";
+  return (
+    value
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") || "?"
+  );
 }
 
 export function BoardStagePreview({
@@ -67,7 +69,7 @@ export function BoardStagePreview({
             {bottomMeta ? <p className="text-sm text-[#cfc7b7]">{bottomMeta}</p> : null}
           </div>
         </div>
-        <Badge className="border-[#5f8443] bg-[#4d6a36] text-[#f7f2e7]">Стартовая позиция</Badge>
+        <Badge className="border-[#5f8443] bg-[#4d6a36] text-[#f7f2e7]">Starting position</Badge>
       </div>
     </section>
   );

@@ -1,4 +1,5 @@
 import { Chess, type Move, type Square } from "chess.js";
+import { chooseOpeningBookMove } from "@/lib/bot-opening-book";
 import { getBotProfile } from "@/lib/bot-profiles";
 import type { BotDifficulty, GameAnalysis, GameResult, SavedGame } from "@/lib/types";
 
@@ -84,17 +85,33 @@ export function classifyMoveQuality({
   sideAdvantage,
   materialSwing,
   playedSan,
+  ply,
+  scoreSwing,
 }: {
   centipawnLoss: number;
   isBest: boolean;
   sideAdvantage: number;
   materialSwing: number;
   playedSan: string;
+  ply?: number;
+  scoreSwing?: number;
 }): GameAnalysis["evaluations"][number]["type"] {
+  const effectiveSwing = scoreSwing ?? centipawnLoss;
+  const isQuietOpening =
+    typeof ply === "number" &&
+    ply <= 12 &&
+    Math.abs(sideAdvantage) <= 120 &&
+    effectiveSwing <= 80;
+
   if (playedSan.includes("#")) return "checkmate";
   if (sideAdvantage > 450 && centipawnLoss >= 251) return "missed win";
   if (isBest && materialSwing <= -250 && centipawnLoss <= 20) return "brilliant";
   if (isBest && centipawnLoss <= 20) return "best move";
+  if (isQuietOpening) {
+    if (centipawnLoss <= 35 || effectiveSwing <= 12) return "excellent";
+    if (centipawnLoss <= 120 || effectiveSwing <= 30) return "good move";
+    if (centipawnLoss <= 190 || effectiveSwing <= 65) return "inaccuracy";
+  }
   if (centipawnLoss <= 20) return "excellent";
   if (centipawnLoss <= 60) return "good move";
   if (centipawnLoss <= 120) return "inaccuracy";
@@ -294,8 +311,11 @@ export function chooseBotMove(fen: string, difficulty: BotDifficulty) {
   const moves = chess.moves({ verbose: true });
   if (!moves.length) return null;
   const profile = getBotProfile(difficulty);
+  const history = chess.history({ verbose: true }).map((move) => `${move.from}${move.to}${move.promotion ?? ""}`);
+  const bookMove = chooseOpeningBookMove(fen, history, profile);
+  if (bookMove) return bookMove;
 
-  if (profile.depth === 0) {
+  if (profile.fallbackDepth === 0) {
     const tacticalMoves = moves.filter(
       (move) => move.isCapture() || move.san.includes("+") || move.san.includes("#"),
     );
@@ -308,7 +328,7 @@ export function chooseBotMove(fen: string, difficulty: BotDifficulty) {
   const scoredMoves = orderedMoves(chess)
     .map((move) => ({
       move,
-      score: scoreProfileMove(fen, move, profile.depth),
+      score: scoreProfileMove(fen, move, profile.fallbackDepth),
     }))
     .sort((a, b) => b.score - a.score);
 
@@ -366,6 +386,8 @@ export function analyzeMoves(moves: string[]): GameAnalysis {
       sideAdvantage: color === "w" ? before : -before,
       materialSwing: delta,
       playedSan: move.san,
+      ply: index + 1,
+      scoreSwing: Math.abs(after - before),
     });
 
     const penalty =

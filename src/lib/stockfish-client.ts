@@ -8,6 +8,7 @@ export type StockfishSearchOptions = {
   depth?: number;
   moveTime?: number;
   elo?: number;
+  skillLevel?: number;
   timeout?: number;
 };
 
@@ -78,8 +79,7 @@ function staticBestMove(fen: string) {
     const line = new Chess(fen);
     const played = line.move({ from: move.from, to: move.to, promotion: move.promotion ?? "q" });
     const score = staticWhiteScore(line);
-    const better =
-      !best || (side === "w" ? score > best.score : score < best.score);
+    const better = !best || (side === "w" ? score > best.score : score < best.score);
     if (better) best = { san: played.san, uci: moveToUci(played), score };
   }
 
@@ -121,22 +121,32 @@ function coachNote({
   beforeScore: number;
   afterScore: number;
 }) {
-  if (type === "checkmate") return "Этот ход поставил мат и завершил партию.";
-  if (type === "best move") return "Stockfish считает этот ход лучшим в позиции.";
-  if (type === "excellent") return "Очень точный ход, оценка позиции почти не изменилась.";
-  if (type === "good move") return "Нормальное практическое решение, но был чуть точнее вариант.";
-  const better = bestMove ? ` Лучше было ${bestMove}.` : "";
-  const swing = `${formatCp(beforeScore)} → ${formatCp(afterScore)}`;
+  if (type === "checkmate") return "This move delivered checkmate.";
+  if (type === "best move") return "Stockfish considers this the best move in the position.";
+  if (type === "excellent") return "Very accurate move. The evaluation barely changed.";
+  if (type === "good move") {
+    if (bestMove && centipawnLoss <= 90 && Math.abs(afterScore - beforeScore) <= 30) {
+      return `Playable move. Engine slightly prefers ${bestMove}, but the evaluation stayed almost the same (${formatCp(beforeScore)} -> ${formatCp(afterScore)}).`;
+    }
+    return "Good practical move, though the engine had a slightly cleaner option.";
+  }
+
+  const better = bestMove ? ` Best was ${bestMove}.` : "";
+  const swing = `${formatCp(beforeScore)} -> ${formatCp(afterScore)}`;
+
+  if (type === "inaccuracy" && centipawnLoss <= 120 && Math.abs(afterScore - beforeScore) <= 35) {
+    return `Playable move. Engine prefers ${bestMove ?? "a different move order"}, but the position remained close to equal (${swing}).`;
+  }
   if (type === "blunder") {
-    return `Ход ${san} резко ухудшил позицию (${swing}) и потерял около ${centipawnLoss} cp.${better}`;
+    return `Move ${san} sharply worsened the position (${swing}) and lost about ${centipawnLoss} cp.${better}`;
   }
   if (type === "mistake") {
-    return `После ${san} позиция заметно просела (${swing}).${better}`;
+    return `After ${san}, the position dropped noticeably (${swing}).${better}`;
   }
   if (type === "missed win") {
-    return `Здесь был шанс удержать выигранную позицию, но ${san} выпустил большое преимущество.${better}`;
+    return `There was a chance to keep a winning position, but ${san} let most of the advantage go.${better}`;
   }
-  return `Ход неточный: оценка изменилась ${swing}.${better}`;
+  return `This move was less precise: the evaluation changed ${swing}.${better}`;
 }
 
 export function getStockfishBestMove(
@@ -155,10 +165,12 @@ export function getStockfishBestMove(
       resolve(null);
       return;
     }
+
     const timeout = window.setTimeout(() => {
       worker.terminate();
       resolve(null);
     }, options.timeout ?? 8000);
+
     const latest: StockfishResult = { bestMove: "", pv: [] };
 
     function finish(result: StockfishResult | null) {
@@ -172,6 +184,9 @@ export function getStockfishBestMove(
 
       if (line === "uciok") {
         worker.postMessage("setoption name Hash value 64");
+        if (typeof options.skillLevel === "number") {
+          worker.postMessage(`setoption name Skill Level value ${Math.max(0, Math.min(20, options.skillLevel))}`);
+        }
         if (options.elo && options.elo < 3000) {
           worker.postMessage("setoption name UCI_LimitStrength value true");
           worker.postMessage(`setoption name UCI_Elo value ${Math.min(options.elo, 3190)}`);
@@ -248,20 +263,25 @@ export async function runStockfishGameAnalysis(
     const afterScore = after
       ? scoreToWhitePerspective(after, afterFen)
       : staticWhiteScore(new Chess(afterFen));
+
     const stockfishLoss = cpLossForSide(side, beforeScore, afterScore);
     const staticLoss = staticBest
       ? cpLossForSide(side, staticBest.score, staticWhiteScore(new Chess(afterFen)))
       : 0;
-    const centipawnLoss = Math.max(stockfishLoss, staticLoss);
+    const hasEngineScores = Boolean(before || after);
+    const centipawnLoss = hasEngineScores ? stockfishLoss : Math.max(stockfishLoss, staticLoss);
     const sideAdvantage = side === "w" ? beforeScore : -beforeScore;
-    const isBest = before?.bestMove === playedUci || staticBest?.uci === playedUci;
+    const isBest = before ? before.bestMove === playedUci : staticBest?.uci === playedUci;
     const type = classifyMoveQuality({
       centipawnLoss,
       isBest,
       sideAdvantage,
       materialSwing,
       playedSan: playedMove.san,
+      ply: index + 1,
+      scoreSwing: Math.abs(afterScore - beforeScore),
     });
+
     losses[side].push(centipawnLoss);
     const bestMove = before?.bestMoveSan ?? staticBest?.san ?? before?.bestMove;
 
@@ -319,11 +339,11 @@ export async function runStockfishGameAnalysis(
     worstMoment,
     keyMoments,
     trainingFocus: worstMoment
-      ? `Тренируйте проверку угроз соперника перед ходом. В этой партии главный провал: ${worstMoment.moveNumber}. ${worstMoment.san}; лучше было ${worstMoment.bestMove ?? "сначала найти ход-кандидат движка"}.`
-      : "Stockfish не нашел крупной ошибки. Продолжайте тренировать реализацию преимущества и профилактику.",
+      ? `Practice checking the opponent's threats before every move. In this game, the biggest swing was move ${worstMoment.moveNumber}: ${worstMoment.san}.`
+      : "No major tactical collapse was found. Focus on improving conversion and move-order accuracy.",
     summary: worstMoment
-      ? `AI Coach: главный перелом был на ходу ${worstMoment.moveNumber}. Вы сыграли ${worstMoment.san}, и оценка изменилась ${formatCp(worstMoment.scoreBefore)} → ${formatCp(worstMoment.scoreAfter)}. ${worstMoment.bestMove ? `Лучше было ${worstMoment.bestMove}. ` : ""}${worstMoment.note}`
-      : "AI Coach: партия прошла ровно, без крупного тактического провала. Главная задача — сохранять внимание к угрозам и не спешить в критических позициях.",
+      ? `AI Coach: the biggest turning point was move ${worstMoment.moveNumber}. You played ${worstMoment.san}, and the evaluation changed ${formatCp(worstMoment.scoreBefore)} -> ${formatCp(worstMoment.scoreAfter)}. ${worstMoment.bestMove ? `Engine preferred ${worstMoment.bestMove}. ` : ""}${worstMoment.note}`
+      : "AI Coach: the game stayed fairly balanced without a major tactical collapse.",
   };
 }
 

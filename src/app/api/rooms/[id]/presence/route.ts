@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { enforceRoomLifecycle } from "@/lib/online-room-rules";
 import { mapRoom } from "@/lib/supabase-data";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 
@@ -24,14 +25,20 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const { data: room, error } = await supabase.from("rooms").select("*").eq("id", id).maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!room) return NextResponse.json({ error: "Room not found." }, { status: 404 });
+  const lifecycle = await enforceRoomLifecycle(supabase, room);
+  const activeRoom = lifecycle.room;
+  if (lifecycle.changed && activeRoom.status !== "ready") {
+    return NextResponse.json({ room: mapRoom(activeRoom) });
+  }
 
-  const side = sideForPlayer(room, body.playerKey);
+  const side = sideForPlayer(activeRoom, body.playerKey);
   if (!side) return NextResponse.json({ error: "Not a room player." }, { status: 403 });
 
+  const nowIso = new Date().toISOString();
   const patch =
     side === "white"
-      ? { white_connected_at: new Date().toISOString(), updated_at: new Date().toISOString() }
-      : { black_connected_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+      ? { white_connected_at: nowIso, updated_at: nowIso }
+      : { black_connected_at: nowIso, updated_at: nowIso };
   const { data: updatedRoom, error: updateError } = await supabase
     .from("rooms")
     .update(patch)

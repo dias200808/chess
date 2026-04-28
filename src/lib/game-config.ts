@@ -16,12 +16,18 @@ export const timeControlPresets: TimeControl[] = [
   { id: "30-0", label: "30+0", initialSeconds: 1800, incrementSeconds: 0 },
 ];
 
+export const guestOnlineTimeControlIds = ["3-0", "5-0", "10-0"] as const;
+
 export function getTimeControlPreset(id: string) {
   return timeControlPresets.find((item) => item.id === id) ?? timeControlPresets[7];
 }
 
 export function describeTimeControl(timeControl: TimeControl) {
-  if (timeControl.initialSeconds === null) return "Без лимита времени";
-  if (timeControl.incrementSeconds === 0) return `${timeControl.label} без добавления`;
-  return `${timeControl.label} с добавлением ${timeControl.incrementSeconds} сек`;
+  if (timeControl.initialSeconds === null) return "No clock";
+  if (timeControl.incrementSeconds === 0) return `${timeControl.label} without increment`;
+  return `${timeControl.label} with ${timeControl.incrementSeconds}s increment`;
+}
+
+export function isGuestOnlineTimeControl(id: string) {
+  return guestOnlineTimeControlIds.includes(id as (typeof guestOnlineTimeControlIds)[number]);
 }

@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { Chess } from "chess.js";
 import { getGameResult } from "@/lib/chess-utils";
+import { enforceRoomLifecycle } from "@/lib/online-room-rules";
+import { sideForPlayer, saveFinishedRoomGame } from "@/lib/online-room-server";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { mapRoom } from "@/lib/supabase-data";
-
-const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 function replay(moves: string[]) {
   const chess = new Chess();
@@ -14,43 +14,8 @@ function replay(moves: string[]) {
   return chess;
 }
 
-function sideForPlayer(room: Record<string, unknown>, playerKey: string) {
-  if (room.host_key === playerKey) return "white";
-  if (room.guest_key === playerKey) return "black";
-  return null;
-}
-
 function resultForTimeout(side: "white" | "black") {
   return side === "white" ? "0-1" : "1-0";
-}
-
-async function saveFinishedGame(room: Record<string, unknown>, moves: string[], fen: string, result: string, endReason: string) {
-  const supabase = getSupabaseServerClient();
-  if (!supabase) return;
-  const chess = replay(moves);
-  await supabase.from("games").upsert(
-    {
-      id: room.id,
-      white_user_id: null,
-      black_user_id: null,
-      white_player: room.host_key ? "White" : "White",
-      black_player: room.guest_key ? "Black" : "Black",
-      mode: "friend",
-      result,
-      winner: result === "1-0" ? "white" : result === "0-1" ? "black" : "draw",
-      end_reason: endReason,
-      opponent: "Online opponent",
-      moves,
-      pgn: chess.pgn(),
-      final_position: fen || START_FEN,
-      time_control: room.time_control ?? null,
-      rated: false,
-      white_accuracy: 0,
-      black_accuracy: 0,
-      analysis: null,
-    },
-    { onConflict: "id" },
-  );
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -77,26 +42,30 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const { data: room, error } = await supabase.from("rooms").select("*").eq("id", id).maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!room) return NextResponse.json({ error: "Room not found." }, { status: 404 });
-  if (room.status !== "ready" || (room.result && room.result !== "*")) {
-    return NextResponse.json({ error: "Game is not playable.", room }, { status: 409 });
+  const lifecycle = await enforceRoomLifecycle(supabase, room);
+  const activeRoom = lifecycle.room;
+  if (lifecycle.changed && (activeRoom.status !== "ready" || (activeRoom.result && activeRoom.result !== "*"))) {
+    return NextResponse.json({ room: mapRoom(activeRoom) });
+  }
+  if (activeRoom.status !== "ready" || (activeRoom.result && activeRoom.result !== "*")) {
+    return NextResponse.json({ error: "Game is not playable." }, { status: 409 });
   }
 
-  const side = sideForPlayer(room, body.playerKey);
+  const side = sideForPlayer(activeRoom, body.playerKey);
   if (!side) return NextResponse.json({ error: "You are not a player in this room." }, { status: 403 });
 
-  const chess = replay(Array.isArray(room.moves) ? room.moves : []);
+  const chess = replay(Array.isArray(activeRoom.moves) ? (activeRoom.moves as string[]) : []);
   const turnSide = chess.turn() === "w" ? "white" : "black";
   if (side !== turnSide) {
     return NextResponse.json({ error: "It is not your turn." }, { status: 409 });
   }
 
   const now = Date.now();
-  const lastMoveAt = room.last_move_at ? new Date(room.last_move_at).getTime() : now;
-  const timed = typeof room.white_time_ms === "number" && typeof room.black_time_ms === "number";
-  const whiteTimeBefore = timed ? Number(room.white_time_ms) : null;
-  const blackTimeBefore = timed ? Number(room.black_time_ms) : null;
-  let whiteTimeMs = whiteTimeBefore;
-  let blackTimeMs = blackTimeBefore;
+  const lastMoveAt =
+    typeof activeRoom.last_move_at === "string" ? new Date(activeRoom.last_move_at).getTime() : now;
+  const timed = typeof activeRoom.white_time_ms === "number" && typeof activeRoom.black_time_ms === "number";
+  let whiteTimeMs = timed ? Number(activeRoom.white_time_ms) : null;
+  let blackTimeMs = timed ? Number(activeRoom.black_time_ms) : null;
 
   if (timed) {
     const elapsed = Math.max(0, now - lastMoveAt);
@@ -115,12 +84,19 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           end_reason: endReason,
           white_time_ms: Math.max(0, whiteTimeMs ?? 0),
           black_time_ms: Math.max(0, blackTimeMs ?? 0),
+          draw_offered_by: null,
+          draw_offer_ply: null,
           updated_at: new Date(now).toISOString(),
         })
         .eq("id", id)
         .select("*")
         .single();
-      await saveFinishedGame(room, chess.history(), chess.fen(), timeoutResult, endReason);
+      await saveFinishedRoomGame(activeRoom, {
+        moves: chess.history(),
+        fen: chess.fen(),
+        result: timeoutResult,
+        endReason,
+      });
       return NextResponse.json({ room: mapRoom(updatedRoom) });
     }
   }
@@ -138,7 +114,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   if (!move) return NextResponse.json({ error: "Illegal move." }, { status: 400 });
 
-  const incrementMs = Number(room.increment_seconds ?? 0) * 1000;
+  const incrementMs = Number(activeRoom.increment_seconds ?? 0) * 1000;
   if (timed) {
     if (side === "white" && whiteTimeMs !== null) whiteTimeMs += incrementMs;
     if (side === "black" && blackTimeMs !== null) blackTimeMs += incrementMs;
@@ -159,7 +135,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       end_reason: endReason,
       white_time_ms: whiteTimeMs,
       black_time_ms: blackTimeMs,
+      draw_offered_by: null,
+      draw_offer_ply: null,
       last_move_at: new Date(now).toISOString(),
+      connect_deadline_at: null,
+      first_move_deadline_at: null,
       updated_at: new Date(now).toISOString(),
     })
     .eq("id", id)
@@ -167,6 +147,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     .single();
 
   if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
-  if (finished) await saveFinishedGame(room, nextMoves, chess.fen(), gameResult.result, endReason ?? "Game over");
+  if (finished) {
+    await saveFinishedRoomGame(activeRoom, {
+      moves: nextMoves,
+      fen: chess.fen(),
+      result: gameResult.result,
+      endReason: endReason ?? "Game over",
+    });
+  }
   return NextResponse.json({ room: mapRoom(updatedRoom) });
 }

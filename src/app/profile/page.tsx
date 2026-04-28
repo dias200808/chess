@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { Badge, Button, Card, Field, LinkButton } from "@/components/ui";
+import { roleLabel } from "@/lib/education";
 import { ratingTypeLabels } from "@/lib/rating";
 import { getPuzzleState, getSavedGames } from "@/lib/storage";
 import type { SavedGame, UserProfile } from "@/lib/types";
@@ -45,15 +46,18 @@ function averageAccuracy(games: SavedGame[], userId: string) {
   return Math.round(values.reduce((total, value) => total + value, 0) / values.length);
 }
 
-function bestPuzzleRating() {
-  const progress = Object.values(getPuzzleState());
+function bestPuzzleRating(userId: string) {
+  const progress = Object.values(getPuzzleState(userId));
   return Math.max(800, ...progress.map((item) => item.bestPuzzleRating ?? item.puzzleRating ?? 800));
 }
 
 function normalizeDraft(user: UserProfile) {
   return {
+    fullName: user.fullName ?? "",
     username: user.username,
     avatar: user.avatar,
+    schoolName: user.schoolName ?? "",
+    age: user.age ? String(user.age) : "",
     city: user.city,
     country: user.country,
   };
@@ -63,8 +67,11 @@ export default function ProfilePage() {
   const { user, updateProfile } = useAuth();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({
+    fullName: "",
     username: "",
     avatar: "",
+    schoolName: "",
+    age: "",
     city: "",
     country: "",
   });
@@ -92,14 +99,17 @@ export default function ProfilePage() {
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   const gamesPlayed = Math.max(profile.gamesCount, games.length);
   const winRate = percentage(profile.wins, gamesPlayed);
-  const puzzleRating = bestPuzzleRating();
+  const puzzleRating = bestPuzzleRating(profile.id);
   const accuracy = averageAccuracy(games, profile.id);
   const streak = currentStreak(games, profile.id);
 
   async function saveProfile() {
     await updateProfile({
+      fullName: draft.fullName.trim() || profile.fullName,
       username: draft.username.trim() || profile.username,
       avatar: draft.avatar.trim().slice(0, 4).toUpperCase() || profile.avatar,
+      schoolName: draft.schoolName.trim() || profile.schoolName,
+      age: draft.age ? Number(draft.age) : profile.age ?? null,
       city: draft.city.trim() || "Unknown",
       country: draft.country.trim() || "Unknown",
     });
@@ -116,12 +126,21 @@ export default function ProfilePage() {
         <p className="text-muted-foreground">{profile.email}</p>
         <div className="mt-4 flex flex-wrap gap-2">
           <Badge>{profile.rating} rating</Badge>
+          <Badge>{roleLabel(profile.role)}</Badge>
+          {profile.teacherVerification && profile.role === "teacher" ? <Badge>{profile.teacherVerification}</Badge> : null}
           <Badge>{profile.city || "Unknown city"}</Badge>
           <Badge>{profile.country || "Unknown country"}</Badge>
         </div>
+        {profile.fullName ? <p className="mt-3 text-sm text-muted-foreground">{profile.fullName}</p> : null}
+        {profile.schoolName ? <p className="mt-1 text-sm text-muted-foreground">{profile.schoolName}</p> : null}
 
         {editing ? (
           <div className="mt-6 grid gap-3">
+            <Field
+              label="Full name"
+              value={draft.fullName}
+              onChange={(event) => setDraft({ ...draft, fullName: event.target.value })}
+            />
             <Field
               label="Username"
               value={draft.username}
@@ -133,6 +152,20 @@ export default function ProfilePage() {
               value={draft.avatar}
               onChange={(event) => setDraft({ ...draft, avatar: event.target.value })}
             />
+            {profile.role === "teacher" ? (
+              <Field
+                label="School / academy"
+                value={draft.schoolName}
+                onChange={(event) => setDraft({ ...draft, schoolName: event.target.value })}
+              />
+            ) : (
+              <Field
+                label="Age"
+                type="number"
+                value={draft.age}
+                onChange={(event) => setDraft({ ...draft, age: event.target.value })}
+              />
+            )}
             <Field
               label="City"
               value={draft.city}
@@ -160,6 +193,7 @@ export default function ProfilePage() {
             Edit Profile
           </Button>
         )}
+        <LinkButton href="/classroom" className="mt-3" variant="ghost">Open Classroom</LinkButton>
       </Card>
 
       <div className="grid gap-6">
@@ -195,7 +229,7 @@ export default function ProfilePage() {
             <div className="rounded-3xl bg-muted p-5">
               <p className="text-sm text-muted-foreground">Profile</p>
               <p className="mt-2 text-sm font-semibold">
-                {profile.username} · {profile.city || "Unknown city"}, {profile.country || "Unknown country"}
+                {profile.fullName || profile.username} · {profile.city || "Unknown city"}, {profile.country || "Unknown country"}
               </p>
             </div>
           </div>

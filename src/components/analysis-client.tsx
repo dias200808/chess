@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useSearchParams } from "next/navigation";
 import { Chess } from "chess.js";
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Cpu, Shuffle } from "lucide-react";
 import type { GameAnalysis, MoveEvaluation, SavedGame } from "@/lib/types";
 import { analyzeMoves, moveTypeLabel, summarizeMoveTypes } from "@/lib/chess-utils";
 import { runStockfishGameAnalysis } from "@/lib/stockfish-client";
-import { getSavedGame, getSavedGames, saveGame } from "@/lib/storage";
+import { getSavedGamesSnapshot, logStudentActivity, saveGame } from "@/lib/storage";
 import { fetchGameFromSupabase, saveGameToSupabase } from "@/lib/supabase-data";
 import { cn } from "@/lib/utils";
 import { Chessboard } from "@/components/client-chessboard";
@@ -125,9 +125,9 @@ function moveBadgeText(type: MoveEvaluation["type"]) {
     case "brilliant":
       return "!!";
     case "excellent":
-      return "✓";
+      return "OK";
     case "good move":
-      return "•";
+      return "+";
     case "inaccuracy":
       return "?!";
     case "mistake":
@@ -170,7 +170,7 @@ function BoardMoveBadge({
       >
         <span
           className={cn(
-            "grid h-9 min-w-9 place-items-center rounded-full border-2 border-white px-2 text-sm font-black shadow-xl",
+            "grid h-8 min-w-8 place-items-center rounded-full border-2 border-white px-2 text-xs font-black shadow-xl sm:h-9 sm:min-w-9 sm:text-sm",
             moveBadgeClassName(move.type),
           )}
         >
@@ -183,6 +183,25 @@ function BoardMoveBadge({
 
 function isBadMove(type: MoveEvaluation["type"]) {
   return ["inaccuracy", "mistake", "blunder", "missed win"].includes(type);
+}
+
+function preferredMoveHeading(move?: MoveEvaluation) {
+  if (!move || !isBadMove(move.type)) return "Quality";
+  if (move.type === "inaccuracy") return "Engine prefers";
+  return "Best move";
+}
+
+function subscribeToNothing() {
+  return () => {};
+}
+
+function parseSavedGamesSnapshot(snapshot: string) {
+  try {
+    const parsed = JSON.parse(snapshot) as SavedGame[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 function sideSummary(analysis: GameAnalysis, color: "w" | "b") {
@@ -209,7 +228,7 @@ function EvaluationBar({
   const whiteShare = Math.max(4, Math.min(96, 50 + Math.max(-800, Math.min(800, score)) / 16));
 
   return (
-    <div className="grid h-full min-h-[28rem] w-12 overflow-hidden rounded-2xl border bg-black text-xs font-black shadow-inner">
+    <div className="grid h-full min-h-[18rem] w-10 overflow-hidden rounded-2xl border bg-black text-[10px] font-black shadow-inner sm:min-h-[28rem] sm:w-12 sm:text-xs">
       <div
         className="flex items-start justify-center px-1 py-2"
         style={{
@@ -229,7 +248,7 @@ function EvaluationBar({
           )}
           style={{ height: `${whiteShare}%` }}
         />
-        <div className="absolute inset-0 grid place-items-center text-[11px] text-white mix-blend-difference">
+        <div className="absolute inset-0 grid place-items-center text-[10px] text-white mix-blend-difference sm:text-[11px]">
           {formatEval(score)}
         </div>
       </div>
@@ -251,31 +270,66 @@ function EvaluationBar({
 export function AnalysisClient() {
   const params = useSearchParams();
   const requestedId = params.get("id");
-  const autoStartedRef = useRef(false);
-  const initialGame = useMemo(() => {
-    if (requestedId) return getSavedGame(requestedId) ?? fallbackGame();
-    return getSavedGames()[0] ?? fallbackGame();
-  }, [requestedId]);
-  const [game, setGame] = useState(initialGame);
-  const [ply, setPly] = useState(initialGame.moves.length);
-  const [selectedIndex, setSelectedIndex] = useState(Math.max(0, initialGame.moves.length - 1));
-  const [analysis, setAnalysis] = useState<GameAnalysis>(
-    analysisForGame(initialGame),
+  const shouldAutoAnalyze = params.get("autostart") === "1" || Boolean(requestedId);
+  const requestKey = requestedId ?? "__latest__";
+  const serverGame = useMemo(() => fallbackGame(), []);
+  const savedGamesSnapshot = useSyncExternalStore(
+    subscribeToNothing,
+    getSavedGamesSnapshot,
+    () => "[]",
   );
-  const [orientation, setOrientation] = useState<"white" | "black">("white");
-  const [engineProgress, setEngineProgress] = useState<{ done: number; total: number } | null>(null);
-  const [engineError, setEngineError] = useState("");
+  const localGame = useMemo(() => {
+    const savedGames = parseSavedGamesSnapshot(savedGamesSnapshot);
+    const savedGame = requestedId ? savedGames.find((game) => game.id === requestedId) : savedGames[0];
+    return savedGame ?? serverGame;
+  }, [requestedId, savedGamesSnapshot, serverGame]);
+  const [remoteGame, setRemoteGame] = useState<{ key: string; game: SavedGame } | null>(null);
 
   useEffect(() => {
     if (!requestedId) return;
-    void fetchGameFromSupabase(requestedId).then((remoteGame) => {
-      if (!remoteGame) return;
-      setGame(remoteGame);
-      setPly(remoteGame.moves.length);
-      setSelectedIndex(Math.max(0, remoteGame.moves.length - 1));
-      setAnalysis(analysisForGame(remoteGame));
+    let cancelled = false;
+
+    void fetchGameFromSupabase(requestedId).then((nextGame) => {
+      if (!cancelled && nextGame) {
+        setRemoteGame({ key: requestKey, game: nextGame });
+      }
     });
-  }, [requestedId]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [requestKey, requestedId]);
+
+  const resolvedRemoteGame = remoteGame?.key === requestKey ? remoteGame.game : null;
+  const initialGame = resolvedRemoteGame ?? localGame;
+
+  return (
+    <AnalysisWorkspace
+      key={`${requestKey}:${resolvedRemoteGame ? "remote" : "local"}:${initialGame.id}`}
+      requestedId={requestedId}
+      shouldAutoAnalyze={shouldAutoAnalyze}
+      initialGame={initialGame}
+    />
+  );
+}
+
+function AnalysisWorkspace({
+  requestedId,
+  shouldAutoAnalyze,
+  initialGame,
+}: {
+  requestedId: string | null;
+  shouldAutoAnalyze: boolean;
+  initialGame: SavedGame;
+}) {
+  const autoStartedRef = useRef(false);
+  const [game, setGame] = useState(initialGame);
+  const [ply, setPly] = useState(initialGame.moves.length);
+  const [selectedIndex, setSelectedIndex] = useState(Math.max(0, initialGame.moves.length - 1));
+  const [analysis, setAnalysis] = useState<GameAnalysis>(analysisForGame(initialGame));
+  const [orientation, setOrientation] = useState<"white" | "black">("white");
+  const [engineProgress, setEngineProgress] = useState<{ done: number; total: number } | null>(null);
+  const [engineError, setEngineError] = useState("");
 
   const runDeepAnalysis = useCallback(async () => {
     if (!game.moves.length || engineProgress) return;
@@ -302,15 +356,27 @@ export function AnalysisClient() {
       setGame(updatedGame);
       saveGame(updatedGame);
       await saveGameToSupabase(updatedGame).catch(() => null);
+      [updatedGame.whiteUserId, updatedGame.blackUserId]
+        .filter((value): value is string => Boolean(value))
+        .forEach((userId) => {
+          logStudentActivity({
+            userId,
+            type: "analyzed_game",
+            title: "Game analyzed with Stockfish",
+            relatedId: updatedGame.id,
+            details: `${updatedGame.result} / ${updatedGame.timeControl ?? "no clock"}`,
+          });
+        });
     } catch {
-      setEngineError("Stockfish не смог завершить разбор в этом браузере. Ходы пока не считаются проверенными.");
+      setEngineError("Stockfish could not finish the review in this browser. You can try again.");
     } finally {
       setEngineProgress(null);
     }
   }, [engineProgress, game]);
 
   useEffect(() => {
-    if (!requestedId || autoStartedRef.current || game.id !== requestedId || !game.moves.length) return;
+    if (!shouldAutoAnalyze || autoStartedRef.current || !game.moves.length) return;
+    if (requestedId && game.id !== requestedId) return;
     const alreadyStockfish = analysis.evaluations.some((item) => item.engine === "stockfish");
     if (alreadyStockfish) return;
     autoStartedRef.current = true;
@@ -318,7 +384,7 @@ export function AnalysisClient() {
       void runDeepAnalysis();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [analysis.evaluations, game.id, game.moves.length, requestedId, runDeepAnalysis]);
+  }, [analysis.evaluations, game.id, game.moves.length, requestedId, runDeepAnalysis, shouldAutoAnalyze]);
 
   const hasStockfishAnalysis = analysis.evaluations.some((item) => item.engine === "stockfish");
   const currentEval =
@@ -339,17 +405,30 @@ export function AnalysisClient() {
       ? analysis.keyMoments
       : hasStockfishAnalysis
         ? analysis.evaluations
-          .filter((item) => isBadMove(item.type) || item.type === "checkmate")
-          .slice(0, 8)
+            .filter((item) => isBadMove(item.type) || item.type === "checkmate")
+            .slice(0, 8)
         : [];
   const whiteSummary = sideSummary(analysis, "w");
   const blackSummary = sideSummary(analysis, "b");
   const bestMoveUci =
-    hasStockfishAnalysis && selectedMove && isBadMove(selectedMove.type) ? selectedMove.bestMoveUci : undefined;
+    hasStockfishAnalysis &&
+    selectedMove &&
+    selectedMove.bestMoveUci &&
+    selectedMove.bestMoveUci !== selectedMove.uci
+      ? selectedMove.bestMoveUci
+      : undefined;
   const bestMoveSquares =
     bestMoveUci && bestMoveUci.length >= 4
       ? [bestMoveUci.slice(0, 2), bestMoveUci.slice(2, 4)]
       : [];
+  const bestMoveArrow =
+    bestMoveSquares.length === 2
+      ? {
+          startSquare: bestMoveSquares[0],
+          endSquare: bestMoveSquares[1],
+          color: "rgba(34, 197, 94, 0.88)",
+        }
+      : undefined;
   const playedMoveSquares =
     selectedMove?.uci && selectedMove.uci.length >= 4
       ? [selectedMove.uci.slice(0, 2), selectedMove.uci.slice(2, 4)]
@@ -369,26 +448,62 @@ export function AnalysisClient() {
         square,
         {
           background:
-            "radial-gradient(circle, rgba(96, 197, 141, 0.6) 34%, rgba(96, 197, 141, 0.22) 36%, transparent 42%)",
+            "linear-gradient(135deg, rgba(34, 197, 94, 0.34), rgba(34, 197, 94, 0.12))",
+          boxShadow: "inset 0 0 0 4px rgba(34, 197, 94, 0.8), 0 0 18px rgba(34, 197, 94, 0.35)",
         },
       ]),
     ),
   };
 
-  function jumpToMove(index: number) {
+  const jumpToMove = useCallback((index: number) => {
     setSelectedIndex(index);
     setPly(index + 1);
-  }
+  }, []);
 
-  function jumpToPly(targetPly: number) {
-    const nextPly = Math.max(0, Math.min(game.moves.length, targetPly));
-    setPly(nextPly);
-    setSelectedIndex(Math.max(0, nextPly - 1));
-  }
+  const jumpToPly = useCallback(
+    (targetPly: number) => {
+      const nextPly = Math.max(0, Math.min(game.moves.length, targetPly));
+      setPly(nextPly);
+      setSelectedIndex(Math.max(0, nextPly - 1));
+    },
+    [game.moves.length],
+  );
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        jumpToPly(ply - 1);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        jumpToPly(ply + 1);
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        jumpToPly(0);
+      } else if (event.key === "End") {
+        event.preventDefault();
+        jumpToPly(game.moves.length);
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [game.moves.length, jumpToPly, ply]);
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_28rem]">
-      <Card className="p-3 sm:p-5">
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
+      <Card className="order-1 p-3 sm:p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 px-1">
           <div>
             <Badge>{game.mode} review</Badge>
@@ -401,7 +516,7 @@ export function AnalysisClient() {
             ) : hasStockfishAnalysis ? (
               <Badge>Stockfish</Badge>
             ) : (
-              <Badge>Не проверено</Badge>
+              <Badge>Pending</Badge>
             )}
           </div>
         </div>
@@ -409,8 +524,8 @@ export function AnalysisClient() {
         {!hasStockfishAnalysis ? (
           <div className="mb-4 rounded-2xl border bg-muted p-4 text-sm leading-6 text-muted-foreground">
             {engineProgress
-              ? "Партия сейчас проверяется Stockfish. До окончания анализа я не показываю качество ходов и точность."
-              : "Партия пока не проанализирована Stockfish. Нажмите «Analyze with Stockfish», чтобы получить настоящие оценки ходов."}
+              ? "Stockfish is already reviewing the game. Accuracy, move grades, and best moves will appear automatically when it finishes."
+              : "This page can run a full Stockfish review automatically. If it did not start, use Retry Stockfish below."}
           </div>
         ) : null}
 
@@ -431,7 +546,7 @@ export function AnalysisClient() {
           </div>
         ) : null}
 
-        <div className="mx-auto grid max-w-[min(92vh,860px)] grid-cols-[3rem_minmax(0,1fr)] gap-3">
+        <div className="mx-auto grid w-full max-w-[min(100%,92vh,860px)] grid-cols-[2.5rem_minmax(0,1fr)] gap-2 sm:grid-cols-[3rem_minmax(0,1fr)] sm:gap-3">
           <EvaluationBar score={currentEval} orientation={orientation} />
           <div className="relative">
             <Chessboard
@@ -439,6 +554,7 @@ export function AnalysisClient() {
                 position: positionAt(game.moves, ply),
                 boardOrientation: orientation,
                 allowDragging: false,
+                arrows: bestMoveArrow ? [bestMoveArrow] : [],
                 squareStyles,
                 boardStyle: {
                   borderRadius: "1.5rem",
@@ -453,13 +569,8 @@ export function AnalysisClient() {
           </div>
         </div>
 
-        <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
-          <Button
-            variant="secondary"
-            aria-label="Go to start"
-            title="Go to start"
-            onClick={() => jumpToPly(0)}
-          >
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
+          <Button variant="secondary" aria-label="Go to start" title="Go to start" onClick={() => jumpToPly(0)}>
             <ChevronsLeft className="h-4 w-4" />
           </Button>
           <Button
@@ -470,66 +581,54 @@ export function AnalysisClient() {
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <span className="font-mono text-sm">
-            {ply} / {game.moves.length} · {hasStockfishAnalysis ? formatEval(currentEval) : "not analyzed"}
+          <span className="min-w-24 text-center font-mono text-xs sm:min-w-32 sm:text-sm">
+            {ply} / {game.moves.length} | {hasStockfishAnalysis ? formatEval(currentEval) : "not analyzed"}
           </span>
-          <Button
-            variant="secondary"
-            aria-label="Next move"
-            title="Next move"
-            onClick={() => jumpToPly(ply + 1)}
-          >
+          <Button variant="secondary" aria-label="Next move" title="Next move" onClick={() => jumpToPly(ply + 1)}>
             <ChevronRight className="h-4 w-4" />
           </Button>
-          <Button
-            variant="secondary"
-            aria-label="Go to end"
-            title="Go to end"
-            onClick={() => jumpToPly(game.moves.length)}
-          >
+          <Button variant="secondary" aria-label="Go to end" title="Go to end" onClick={() => jumpToPly(game.moves.length)}>
             <ChevronsRight className="h-4 w-4" />
           </Button>
-          <Button
-            variant="secondary"
-            onClick={() => setOrientation((side) => (side === "white" ? "black" : "white"))}
-          >
+          <Button variant="secondary" onClick={() => setOrientation((side) => (side === "white" ? "black" : "white"))}>
             <Shuffle className="mr-2 h-4 w-4" />
             Flip Board
           </Button>
         </div>
+
         {selectedMove ? (
-          <div className="mx-auto mt-4 grid max-w-[min(92vh,860px)] gap-2 rounded-2xl border bg-muted p-4 text-sm sm:grid-cols-[1fr_1fr_1.3fr]">
+          <div className="mx-auto mt-4 grid max-w-[min(100%,92vh,860px)] gap-2 rounded-2xl border bg-muted p-4 text-sm sm:grid-cols-[1fr_1fr_1.3fr]">
             <div>
-              <p className="text-xs font-semibold text-muted-foreground">Ход</p>
+              <p className="text-xs font-semibold text-muted-foreground">Move</p>
               <p className="mt-1 font-mono text-lg font-black">
                 {selectedMove.moveNumber}. {selectedMove.san}
               </p>
             </div>
             <div>
-              <p className="text-xs font-semibold text-muted-foreground">Оценка</p>
+              <p className="text-xs font-semibold text-muted-foreground">Evaluation</p>
               <p className="mt-1 font-mono text-lg font-black">
                 {hasStockfishAnalysis
-                  ? `${formatEval(selectedMove.scoreBefore)} → ${formatEval(selectedMove.scoreAfter)}`
+                  ? `${formatEval(selectedMove.scoreBefore)} -> ${formatEval(selectedMove.scoreAfter)}`
                   : "not checked"}
               </p>
             </div>
             <div>
               <p className="text-xs font-semibold text-muted-foreground">
-                {hasStockfishAnalysis && isBadMove(selectedMove.type) ? "Лучше было" : "Качество"}
+                {hasStockfishAnalysis && isBadMove(selectedMove.type) ? "Best move" : "Quality"}
               </p>
               <p className="mt-1 truncate font-semibold">
                 {!hasStockfishAnalysis
-                  ? "Ожидает Stockfish"
+                  ? "Waiting for Stockfish"
                   : isBadMove(selectedMove.type)
-                  ? selectedMove.bestMove ?? "линия движка"
-                  : moveTypeLabel(selectedMove.type)}
+                    ? selectedMove.bestMove ?? "engine line"
+                    : moveTypeLabel(selectedMove.type)}
               </p>
             </div>
           </div>
         ) : null}
       </Card>
 
-      <aside className="grid gap-4 content-start">
+      <aside className="order-2 grid content-start gap-4">
         <Card>
           <h2 className="text-xl font-black">AI Coach</h2>
           {hasStockfishAnalysis ? (
@@ -539,36 +638,33 @@ export function AnalysisClient() {
             </>
           ) : (
             <p className="mt-3 rounded-2xl bg-muted p-4 text-sm leading-6 text-muted-foreground">
-              Разбор ещё не готов. Stockfish должен проверить позицию до и после каждого хода; только после этого
-              появятся ошибки, лучшие ходы и точность.
+              Stockfish is responsible for the full review. This page will fill in move quality, best moves,
+              and accuracy automatically as soon as the engine finishes.
             </p>
           )}
-          <Button
-            className="mt-4 w-full"
-            variant="secondary"
-            onClick={runDeepAnalysis}
-            disabled={Boolean(engineProgress)}
-          >
-            <Cpu className="mr-2 h-4 w-4" />
-            {engineProgress
-              ? `Stockfish ${engineProgress.done}/${engineProgress.total}`
-              : "Analyze with Stockfish"}
-          </Button>
+          {(!engineProgress || hasStockfishAnalysis || Boolean(engineError)) ? (
+            <Button className="mt-4 w-full" variant="secondary" onClick={runDeepAnalysis} disabled={Boolean(engineProgress)}>
+              <Cpu className="mr-2 h-4 w-4" />
+              {engineProgress ? `Stockfish ${engineProgress.done}/${engineProgress.total}` : hasStockfishAnalysis ? "Re-run Stockfish" : "Retry Stockfish"}
+            </Button>
+          ) : null}
           {engineError ? (
-            <p className="mt-3 rounded-2xl bg-destructive/10 p-3 text-sm text-destructive">
-              {engineError}
-            </p>
+            <p className="mt-3 rounded-2xl bg-destructive/10 p-3 text-sm text-destructive">{engineError}</p>
           ) : null}
         </Card>
 
         <div className="grid grid-cols-2 gap-4">
           <Card>
             <p className="text-sm text-muted-foreground">White accuracy</p>
-            <p className="font-mono text-4xl font-black">{hasStockfishAnalysis ? `${analysis.whiteAccuracy}%` : "--"}</p>
+            <p className="font-mono text-3xl font-black sm:text-4xl">
+              {hasStockfishAnalysis ? `${analysis.whiteAccuracy}%` : "--"}
+            </p>
           </Card>
           <Card>
             <p className="text-sm text-muted-foreground">Black accuracy</p>
-            <p className="font-mono text-4xl font-black">{hasStockfishAnalysis ? `${analysis.blackAccuracy}%` : "--"}</p>
+            <p className="font-mono text-3xl font-black sm:text-4xl">
+              {hasStockfishAnalysis ? `${analysis.blackAccuracy}%` : "--"}
+            </p>
           </Card>
         </div>
 
@@ -583,14 +679,14 @@ export function AnalysisClient() {
                 <span className="text-muted-foreground">You played</span>
                 <span className="font-mono font-black">{selectedMove.san}</span>
               </div>
-              <div className="flex items-center justify-between rounded-2xl bg-muted px-4 py-3">
-                <span className="text-muted-foreground">Best was</span>
-                <span className="font-mono font-black">{selectedMove.bestMove ?? "same idea"}</span>
+              <div className="flex items-center justify-between gap-3 rounded-2xl bg-muted px-4 py-3">
+                <span className="text-muted-foreground">{preferredMoveHeading(selectedMove)}</span>
+                <span className="truncate font-mono font-black">{selectedMove.bestMove ?? "same idea"}</span>
               </div>
               <div className="flex items-center justify-between rounded-2xl bg-muted px-4 py-3">
                 <span className="text-muted-foreground">Evaluation</span>
                 <span className="font-mono font-black">
-                  {formatEval(selectedMove.scoreBefore)} → {formatEval(selectedMove.scoreAfter)}
+                  {formatEval(selectedMove.scoreBefore)} {"->"} {formatEval(selectedMove.scoreAfter)}
                 </span>
               </div>
               <div className="flex items-center justify-between rounded-2xl bg-muted px-4 py-3">
@@ -602,7 +698,7 @@ export function AnalysisClient() {
           </Card>
         ) : null}
 
-        <Card className="max-h-[32rem] overflow-auto">
+        <Card className="max-h-[28rem] overflow-auto sm:max-h-[32rem]">
           <h2 className="text-xl font-black">Move History</h2>
           <div className="mt-4 grid gap-2">
             {Array.from({ length: Math.ceil(game.moves.length / 2) }).map((_, turnIndex) => {
@@ -623,15 +719,9 @@ export function AnalysisClient() {
                         onClick={() => jumpToMove(move.ply - 1)}
                       >
                         <span className="font-mono font-black">{move.san}</span>
-                        {hasStockfishAnalysis ? (
-                          <span className="mt-1 block text-xs font-semibold opacity-80">
-                            {moveTypeLabel(move.type)}
-                          </span>
-                        ) : (
-                          <span className="mt-1 block text-xs font-semibold opacity-70">
-                            not analyzed
-                          </span>
-                        )}
+                        <span className="mt-1 block text-xs font-semibold opacity-80">
+                          {hasStockfishAnalysis ? moveTypeLabel(move.type) : "not analyzed"}
+                        </span>
                       </button>
                     ) : (
                       <span key={`empty-${offset}`} />
@@ -644,32 +734,32 @@ export function AnalysisClient() {
         </Card>
 
         {hasStockfishAnalysis ? (
-        <Card>
-          <h2 className="text-xl font-black">Game Review Summary</h2>
-          <div className="mt-4 grid gap-3 text-sm">
-            {[
-              ["White", whiteSummary],
-              ["Black", blackSummary],
-            ].map(([label, summary]) => {
-              const item = summary as ReturnType<typeof sideSummary>;
-              return (
-                <div key={label as string} className="rounded-2xl bg-muted p-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-black">{label as string}</h3>
-                    <Badge>{item.accuracy}%</Badge>
+          <Card>
+            <h2 className="text-xl font-black">Game Review Summary</h2>
+            <div className="mt-4 grid gap-3 text-sm">
+              {[
+                ["White", whiteSummary],
+                ["Black", blackSummary],
+              ].map(([label, summary]) => {
+                const item = summary as ReturnType<typeof sideSummary>;
+                return (
+                  <div key={label as string} className="rounded-2xl bg-muted p-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-black">{label as string}</h3>
+                      <Badge>{item.accuracy}%</Badge>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-muted-foreground">
+                      <span>Best: {item.best}</span>
+                      <span>Good: {item.good}</span>
+                      <span>Inaccuracies: {item.inaccuracies}</span>
+                      <span>Mistakes: {item.mistakes}</span>
+                      <span>Blunders: {item.blunders}</span>
+                    </div>
                   </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-muted-foreground">
-                    <span>Best: {item.best}</span>
-                    <span>Good: {item.good}</span>
-                    <span>Inaccuracies: {item.inaccuracies}</span>
-                    <span>Mistakes: {item.mistakes}</span>
-                    <span>Blunders: {item.blunders}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
+                );
+              })}
+            </div>
+          </Card>
         ) : null}
 
         <Card>
@@ -690,7 +780,7 @@ export function AnalysisClient() {
                   </span>
                   <Badge className="ml-2">{moveTypeLabel(item.type)}</Badge>
                   <span className="mt-1 block opacity-85">
-                    Better was {item.bestMove ?? "the engine line"} · {formatEval(item.scoreBefore)} →{" "}
+                    Better was {item.bestMove ?? "the engine line"} | {formatEval(item.scoreBefore)} {"→"}{" "}
                     {formatEval(item.scoreAfter)}
                   </span>
                 </button>
@@ -706,35 +796,39 @@ export function AnalysisClient() {
         </Card>
 
         {hasStockfishAnalysis ? (
-        <Card>
-          <h2 className="text-xl font-black">Evaluation Graph</h2>
-          <svg className="mt-4 h-32 w-full overflow-visible rounded-2xl bg-muted" viewBox="0 0 100 100" preserveAspectRatio="none">
-            <line x1="0" x2="100" y1="50" y2="50" stroke="currentColor" strokeOpacity="0.22" strokeWidth="1" />
-            <path d={evalPath} fill="none" stroke="var(--primary)" strokeWidth="3" vectorEffect="non-scaling-stroke" />
-          </svg>
-          <p className="mt-3 text-xs text-muted-foreground">
-            Positive means White is better. Negative means Black is better.
-          </p>
-        </Card>
+          <Card>
+            <h2 className="text-xl font-black">Evaluation Graph</h2>
+            <svg
+              className="mt-4 h-32 w-full overflow-visible rounded-2xl bg-muted"
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+            >
+              <line x1="0" x2="100" y1="50" y2="50" stroke="currentColor" strokeOpacity="0.22" strokeWidth="1" />
+              <path d={evalPath} fill="none" stroke="var(--primary)" strokeWidth="3" vectorEffect="non-scaling-stroke" />
+            </svg>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Positive means White is better. Negative means Black is better.
+            </p>
+          </Card>
         ) : null}
 
         {hasStockfishAnalysis ? (
-        <Card>
-          <h2 className="text-xl font-black">Move Quality</h2>
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            {reviewCounts.map((item) => (
-              <div key={item.type} className={cn("rounded-2xl border p-4", moveClassName(item.type))}>
-                <p className="text-xs uppercase tracking-[0.14em] opacity-75">
-                  {moveTypeLabel(item.type)}
-                </p>
-                <p className="mt-2 font-mono text-3xl font-black">{item.count}</p>
-              </div>
-            ))}
-          </div>
-        </Card>
+          <Card>
+            <h2 className="text-xl font-black">Move Quality</h2>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              {reviewCounts.map((item) => (
+                <div key={item.type} className={cn("rounded-2xl border p-4", moveClassName(item.type))}>
+                  <p className="text-xs uppercase tracking-[0.14em] opacity-75">{moveTypeLabel(item.type)}</p>
+                  <p className="mt-2 font-mono text-3xl font-black">{item.count}</p>
+                </div>
+              ))}
+            </div>
+          </Card>
         ) : null}
 
-        <LinkButton href="/history" variant="secondary">Back to history</LinkButton>
+        <LinkButton href="/history" variant="secondary">
+          Back to history
+        </LinkButton>
       </aside>
     </div>
   );
