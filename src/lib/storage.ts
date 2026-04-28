@@ -339,4 +339,7 @@ export function getSettings(): ChessSettings {
 
 export function setSettings(settings: ChessSettings) {
   writeJson(SETTINGS_KEY, settings);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("knightly:settings-changed", { detail: settings }));
+  }
 }

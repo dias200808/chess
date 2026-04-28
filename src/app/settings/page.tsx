@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { useTheme } from "@/components/theme-provider";
 import { Badge, Button, Card, SelectField } from "@/components/ui";
@@ -17,25 +18,52 @@ function Toggle({
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="flex items-center justify-between rounded-2xl border bg-muted p-4 font-medium">
-      <span>{label}</span>
-      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+    <label className="flex min-h-16 cursor-pointer touch-manipulation items-center justify-between gap-4 rounded-2xl border bg-muted p-4 font-medium active:scale-[0.99]">
+      <span className="min-w-0 break-words">{label}</span>
+      <input
+        className="h-6 w-6 shrink-0 cursor-pointer"
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
     </label>
   );
 }
 
 export default function SettingsPage() {
+  const router = useRouter();
   const { theme, setTheme } = useTheme();
   const { logout } = useAuth();
   const [settings, setLocalSettings] = useState<ChessSettings>(() => getSettings());
+  const [status, setStatus] = useState("");
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   function update(next: ChessSettings) {
     setLocalSettings(next);
     setSettings(next);
   }
 
+  function resetSettings() {
+    update({ ...defaultSettings });
+    setStatus("Settings reset.");
+  }
+
+  async function handleLogout() {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    setStatus("Logging out...");
+    try {
+      await logout();
+      router.replace("/");
+      router.refresh();
+    } catch {
+      setStatus("Could not log out. Try again.");
+      setIsLoggingOut(false);
+    }
+  }
+
   return (
-    <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-[1fr_1fr]">
+    <div className="mx-auto grid max-w-5xl gap-4 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:gap-6 lg:grid-cols-[1fr_1fr]">
       <Card>
         <Badge>Appearance</Badge>
         <h1 className="mt-2 text-3xl font-black">Settings</h1>
@@ -89,9 +117,14 @@ export default function SettingsPage() {
           <Toggle label="Premoves" checked={settings.premoves} onChange={(premoves) => update({ ...settings, premoves })} />
           <Toggle label="Move confirmation" checked={settings.moveConfirmation} onChange={(moveConfirmation) => update({ ...settings, moveConfirmation })} />
           <Toggle label="Zen mode" checked={settings.zenMode} onChange={(zenMode) => update({ ...settings, zenMode })} />
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <Button variant="secondary" onClick={() => update(defaultSettings)}>Reset settings</Button>
-            <Button variant="danger" onClick={logout}>Log out</Button>
+          {status ? <p className="mt-2 rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">{status}</p> : null}
+          <div className="sticky bottom-3 z-10 mt-3 grid gap-3 rounded-[1.5rem] border bg-card/95 p-3 backdrop-blur sm:static sm:grid-cols-2 sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-0">
+            <Button className="h-12 w-full touch-manipulation" variant="secondary" onClick={resetSettings}>
+              Reset settings
+            </Button>
+            <Button className="h-12 w-full touch-manipulation" variant="danger" onClick={handleLogout} disabled={isLoggingOut}>
+              {isLoggingOut ? "Logging out..." : "Log out"}
+            </Button>
           </div>
         </div>
       </Card>

@@ -12,7 +12,7 @@ export function Button({
   return (
     <button
       className={cn(
-        "inline-flex h-11 items-center justify-center rounded-full px-5 text-sm font-semibold transition hover:-translate-y-0.5 disabled:pointer-events-none disabled:opacity-50",
+        "inline-flex h-11 min-w-0 items-center justify-center rounded-full px-5 text-sm font-semibold transition hover:-translate-y-0.5 disabled:pointer-events-none disabled:opacity-50",
         variant === "primary" &&
           "bg-primary text-primary-foreground shadow-lg shadow-primary/15 hover:brightness-105",
         variant === "secondary" &&
@@ -38,7 +38,7 @@ export function LinkButton({
   return (
     <Link
       className={cn(
-        "inline-flex h-11 items-center justify-center rounded-full px-5 text-sm font-semibold transition hover:-translate-y-0.5",
+        "inline-flex h-11 min-w-0 items-center justify-center rounded-full px-5 text-sm font-semibold transition hover:-translate-y-0.5",
         variant === "primary" &&
           "bg-primary text-primary-foreground shadow-lg shadow-primary/15 hover:brightness-105",
         variant === "secondary" &&
@@ -55,7 +55,7 @@ export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
     <section
       className={cn(
-        "rounded-[2rem] border bg-card/88 p-6 text-card-foreground shadow-xl shadow-black/5 backdrop-blur",
+        "min-w-0 rounded-[1.5rem] border bg-card/88 p-4 text-card-foreground shadow-xl shadow-black/5 backdrop-blur sm:rounded-[2rem] sm:p-6",
         className,
       )}
       {...props}
@@ -81,11 +81,11 @@ export function Field({
   ...props
 }: React.InputHTMLAttributes<HTMLInputElement> & { label: string }) {
   return (
-    <label className="grid gap-2 text-sm font-medium">
+    <label className="grid min-w-0 gap-2 text-sm font-medium">
       <span>{label}</span>
       <input
         className={cn(
-          "h-11 rounded-2xl border bg-background px-4 text-sm outline-none transition focus:ring-2 focus:ring-ring",
+          "h-11 w-full min-w-0 rounded-2xl border bg-background px-4 text-sm outline-none transition focus:ring-2 focus:ring-ring",
           className,
         )}
         {...props}
@@ -101,11 +101,11 @@ export function SelectField({
   ...props
 }: React.SelectHTMLAttributes<HTMLSelectElement> & { label: string }) {
   return (
-    <label className="grid gap-2 text-sm font-medium">
+    <label className="grid min-w-0 gap-2 text-sm font-medium">
       <span>{label}</span>
       <select
         className={cn(
-          "h-11 rounded-2xl border bg-background px-4 text-sm outline-none transition focus:ring-2 focus:ring-ring",
+          "h-11 w-full min-w-0 rounded-2xl border bg-background px-4 text-sm outline-none transition focus:ring-2 focus:ring-ring",
           className,
         )}
         {...props}

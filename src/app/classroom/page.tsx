@@ -67,19 +67,23 @@ function SectionTitle({
   description: string;
 }) {
   return (
-    <div>
-      <Badge>{badge}</Badge>
-      <h1 className="mt-2 text-3xl font-black">{title}</h1>
-      <p className="mt-2 text-sm text-muted-foreground">{description}</p>
+    <div className="min-w-0">
+      <Badge className="max-w-full truncate">{badge}</Badge>
+      <h1 className="mt-2 max-w-full break-words text-3xl font-black leading-tight sm:text-4xl">
+        {title}
+      </h1>
+      <p className="mt-2 max-w-prose text-sm leading-relaxed text-muted-foreground">{description}</p>
     </div>
   );
 }
 
 function StatCard({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
   return (
-    <Card className="rounded-2xl p-5">
-      <p className="text-sm text-muted-foreground">{label}</p>
-      <p className="mt-2 font-mono text-4xl font-black">{value}</p>
+    <Card className="rounded-2xl p-3 sm:p-5">
+      <p className="truncate text-xs text-muted-foreground sm:text-sm">{label}</p>
+      <p className="mt-1 break-words font-mono text-2xl font-black leading-none sm:mt-2 sm:text-4xl">
+        {value}
+      </p>
       {hint ? <p className="mt-2 text-xs text-muted-foreground">{hint}</p> : null}
     </Card>
   );
@@ -708,7 +712,7 @@ export default function ClassroomPage() {
     const freePlanSummary = `${teacherClasses.length}/${FREE_TEACHER_CLASS_LIMIT} classes • ${totalActiveStudentsForTeacher()}/${FREE_TEACHER_STUDENT_LIMIT} students • ${monthlyAssignmentCount()}/${FREE_TEACHER_ASSIGNMENT_LIMIT} assignments`;
 
     return (
-      <div className="grid gap-6">
+      <div className="grid min-w-0 gap-5 sm:gap-6">
         {upgradeMessage ? (
           <Card className="border-primary/40 bg-primary/10">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -744,7 +748,7 @@ export default function ClassroomPage() {
           </div>
         </Card>
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-7">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 xl:grid-cols-7">
           <StatCard label="Students" value={teacherDashboard.totalStudents} />
           <StatCard label="Active today" value={teacherDashboard.activeStudentsToday} />
           <StatCard label="Puzzles today" value={teacherDashboard.puzzlesSolvedToday} />
@@ -1028,12 +1032,12 @@ export default function ClassroomPage() {
                 return (
                   <div
                     key={entry.student.id}
-                    className="grid grid-cols-[2.5rem_1fr_auto] items-center gap-3 rounded-2xl bg-muted p-4"
+                    className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl bg-muted p-3 sm:grid-cols-[2.5rem_minmax(0,1fr)_auto] sm:p-4"
                   >
                     <div className="text-center font-mono text-2xl font-black">{index + 1}</div>
-                    <div>
-                      <p className="font-semibold">{entry.student.fullName || entry.student.username}</p>
-                      <p className="text-xs text-muted-foreground">
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold">{entry.student.fullName || entry.student.username}</p>
+                      <p className="break-words text-xs text-muted-foreground">
                         Rating {entry.student.rating} • Puzzle {entry.student.puzzleRating} • Solved {entry.solvedPuzzles} • Games {gamesPlayed}
                       </p>
                     </div>
@@ -1056,7 +1060,7 @@ export default function ClassroomPage() {
               description="Teacher view of games, puzzles, assignments, activity, and basic AI report."
             />
 
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-8">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4 xl:grid-cols-8">
               <StatCard label="Rating" value={selectedStudent.rating} />
               <StatCard label="Puzzle rating" value={selectedStudent.puzzleRating} />
               <StatCard label="Games" value={selectedStudentGames.length} />
@@ -1323,7 +1327,7 @@ export default function ClassroomPage() {
   const studentNotifications = notifications.filter((item) => item.userId === currentUser.id).slice(0, 6);
 
   return (
-    <div className="grid gap-6">
+    <div className="grid min-w-0 gap-5 sm:gap-6">
       {upgradeMessage ? (
         <Card className="border-primary/40 bg-primary/10">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1341,7 +1345,7 @@ export default function ClassroomPage() {
         description="Join a teacher class, complete assignments, and let your teacher track games and puzzles."
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 xl:grid-cols-6">
         <StatCard label="Role" value={roleLabel(currentUser.role)} />
         <StatCard label="Rating" value={currentUser.rating} />
         <StatCard label="Puzzle rating" value={currentUser.puzzleRating} />

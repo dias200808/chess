@@ -21,13 +21,14 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { backgroundClass } from "@/lib/board-visuals";
 import { getSettings } from "@/lib/storage";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth-provider";
 import { useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui";
+import type { ChessSettings } from "@/lib/types";
 
 const navSections = [
   {
@@ -58,7 +59,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const { mounted, resolvedTheme, setTheme } = useTheme();
   const [open, setOpen] = useState(false);
-  const shellSettings = getSettings();
+  const [shellSettings, setShellSettings] = useState<ChessSettings>(() => getSettings());
+
+  useEffect(() => {
+    function syncSettings(event?: Event) {
+      const changedEvent = event as CustomEvent<ChessSettings> | undefined;
+      setShellSettings(changedEvent?.detail ?? getSettings());
+    }
+
+    window.addEventListener("knightly:settings-changed", syncSettings);
+    window.addEventListener("storage", syncSettings);
+    return () => {
+      window.removeEventListener("knightly:settings-changed", syncSettings);
+      window.removeEventListener("storage", syncSettings);
+    };
+  }, []);
 
   const nav = (
     <nav className="grid gap-5">
@@ -154,7 +169,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      <div className="min-w-0">
+      <div className="min-w-0 overflow-x-hidden">
         <header className="sticky top-0 z-40 border-b border-white/6 bg-[#24221f]/92 backdrop-blur lg:hidden">
           <div className="flex items-center justify-between gap-4 px-4 py-3">
             <Link href="/" className="flex items-center gap-3">
@@ -203,7 +218,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           ) : null}
         </header>
 
-        <main className="min-h-screen px-3 py-3 sm:px-4 sm:py-4 lg:px-5 lg:py-5">{children}</main>
+        <main className="min-h-screen overflow-x-hidden px-3 py-3 sm:px-4 sm:py-4 lg:px-5 lg:py-5">
+          {children}
+        </main>
       </div>
     </div>
   );

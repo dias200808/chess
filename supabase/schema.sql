@@ -549,6 +549,9 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  metadata jsonb := coalesce(new.raw_user_meta_data, '{}'::jsonb);
+  metadata_age text := metadata ->> 'age';
 begin
   insert into public.profiles (
     id,
@@ -572,22 +575,33 @@ begin
   values (
     new.id,
     new.email,
-    coalesce(new.raw_user_meta_data ->> 'username', split_part(new.email, '@', 1)),
-    new.raw_user_meta_data ->> 'full_name',
-    coalesce(new.raw_user_meta_data ->> 'role', 'student'),
-    new.raw_user_meta_data ->> 'school_name',
-    nullif(new.raw_user_meta_data ->> 'age', '')::integer,
-    case when coalesce(new.raw_user_meta_data ->> 'role', 'student') = 'teacher' then 'pending' else 'unverified' end,
-    coalesce(new.raw_user_meta_data ->> 'city', 'Unknown'),
-    coalesce(new.raw_user_meta_data ->> 'country', 'Unknown'),
-    upper(left(coalesce(new.raw_user_meta_data ->> 'username', split_part(new.email, '@', 1)), 2)),
+    coalesce(nullif(metadata ->> 'username', ''), split_part(new.email, '@', 1)),
+    nullif(metadata ->> 'full_name', ''),
+    case when metadata ->> 'role' = 'teacher' then 'teacher' else 'student' end,
+    nullif(metadata ->> 'school_name', ''),
+    case when metadata_age ~ '^[0-9]+$' then metadata_age::integer else null end,
+    case when metadata ->> 'role' = 'teacher' then 'pending' else 'unverified' end,
+    coalesce(nullif(metadata ->> 'city', ''), 'Unknown'),
+    coalesce(nullif(metadata ->> 'country', ''), 'Unknown'),
+    upper(left(coalesce(nullif(metadata ->> 'username', ''), split_part(new.email, '@', 1)), 2)),
     1200,
     1200,
     1200,
     1200,
     1200,
     1200
-  );
+  )
+  on conflict (id) do update set
+    email = excluded.email,
+    username = excluded.username,
+    full_name = excluded.full_name,
+    role = excluded.role,
+    school_name = excluded.school_name,
+    age = excluded.age,
+    teacher_verification = excluded.teacher_verification,
+    city = excluded.city,
+    country = excluded.country,
+    avatar = excluded.avatar;
   return new;
 end;
 $$;
